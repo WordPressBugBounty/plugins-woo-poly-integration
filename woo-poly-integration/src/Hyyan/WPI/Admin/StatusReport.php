@@ -2,11 +2,18 @@
 
 use Hyyan\WPI\Tools\TranslationsDownloader;
 
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 /*
  *
  */
-add_action( 'woocommerce_system_status_report', 'wpi_status_report' );
-function wpi_status_report() {
+add_action( 'woocommerce_system_status_report', 'woo_poly_integration_status_report' );
+function woo_poly_integration_status_report() {
+	$allowed_tip_html = array(
+		'span' => array( 'class' => true, 'tabindex' => true, 'aria-label' => true, 'data-tip' => true ),
+	);
 	?>
 
 	<table class="wc_status_table widefat" cellspacing="0">
@@ -18,31 +25,31 @@ function wpi_status_report() {
 		<tbody>
 			<tr>
 				<td data-export-label="Language Locale"><?php esc_html_e( 'Language Locale', 'woo-poly-integration' ); ?>:</td>
-				<td class="help"><?php echo wc_help_tip( esc_html__( 'The current language used by WordPress. Default = English', 'woocommerce' ) ); /* phpcs:ignore WordPress.XSS.EscapeOutput.OutputNotEscaped */ ?></td>
+				<td class="help"><?php echo wp_kses( wc_help_tip( esc_html__( 'The current language used by WordPress. Default = English', 'woo-poly-integration' ) ), $allowed_tip_html ); ?></td>
 				<td><?php echo esc_html( get_locale() ); ?></td>
 			</tr>
 			<tr>
 				<td data-export-label="Polylang Language Locale"><?php esc_html_e( 'Polylang Default Language Locale', 'woo-poly-integration' ); ?>:</td>
-				<td class="help"><?php echo wc_help_tip( esc_html__( 'The default language set in Polylang', 'woo-poly-integration' ) ); /* phpcs:ignore WordPress.XSS.EscapeOutput.OutputNotEscaped */ ?></td>
+				<td class="help"><?php echo wp_kses( wc_help_tip( esc_html__( 'The default language set in Polylang', 'woo-poly-integration' ) ), $allowed_tip_html ); ?></td>
 				<td><?php echo esc_html( pll_default_language( 'locale' ) ); ?></td>
 			</tr>
 			<tr>
 				<td data-export-label="Polylang Available Languages"><?php esc_html_e( 'Polylang Available Languages', 'woo-poly-integration' ); ?>:</td>
-				<td class="help"><?php echo wc_help_tip( esc_html__( 'The available languages in Polylang', 'woo-poly-integration' ) ); /* phpcs:ignore WordPress.XSS.EscapeOutput.OutputNotEscaped */ ?></td>
+				<td class="help"><?php echo wp_kses( wc_help_tip( esc_html__( 'The available languages in Polylang', 'woo-poly-integration' ) ), $allowed_tip_html ); ?></td>
 				<td><?php
 					$langs = pll_languages_list( array( 'fields' => 'locale' ) );
 
 					foreach ( $langs as $langId => $langLocale ) {
-						echo($langLocale);
+						echo esc_html( $langLocale );
 						$downloaded	 = TranslationsDownloader::isDownloaded( $langLocale );
 						$location	 = sprintf(
 						trailingslashit( WP_LANG_DIR )
 						. 'plugins/woocommerce-%s.mo', $langLocale
 						);
 						if ( $downloaded ) {
-							echo(' (WooCommerce translation file found OK at ' . $location . ') ');
+							echo esc_html( ' (WooCommerce translation file found OK at ' . $location . ') ' );
 						} else {
-							echo(' Warning - missing WooCommerce translation file NOT found at ' . $location . ' ');
+							echo esc_html( ' Warning - missing WooCommerce translation file NOT found at ' . $location . ' ' );
 						}
 						echo '<br/>';
 					}

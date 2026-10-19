@@ -21,7 +21,16 @@ class Stock {
 
 		//disable on product edit screen as this has its own synchronisation on save
 		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : false;
-		if ( ($screen && $screen->post_type === 'product') || isset( $_POST[ 'product-type' ] ) ) {
+		if ( ($screen && $screen->post_type === 'product') ||
+                (is_admin() && current_user_can('edit_products') &&
+                isset($_POST['action'], $_POST['product-type'], $_POST['post_ID'], $_POST['_wpnonce']) &&
+                $_POST['action'] === 'editpost' && is_string($_POST['product-type']) &&
+                (is_int($_POST['post_ID']) || is_string($_POST['post_ID'])) &&
+                is_string($_POST['_wpnonce']) &&
+                ($post_id = filter_var(wp_unslash($_POST['post_ID']), FILTER_VALIDATE_INT,
+                    array('options' => array('min_range' => 1)))) &&
+                get_post_type($post_id) === 'product' && current_user_can('edit_post', $post_id) &&
+                wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_wpnonce'])), 'update-post_'.$post_id)) ) {
 			return;
 		}
 
@@ -42,8 +51,11 @@ class Stock {
 	public static function SyncStockSimple( \WC_Product $product ) {
 		//first remove this action to avoid recusive call when setting translation stock
 		remove_action( 'woocommerce_product_set_stock', array( __CLASS__, __FUNCTION__ ), 10 );
-		static::SyncStock( $product );
-		add_action( 'woocommerce_product_set_stock', array( __CLASS__, __FUNCTION__ ), 10 );
+		try {
+			static::SyncStock( $product );
+		} finally {
+			add_action( 'woocommerce_product_set_stock', array( __CLASS__, __FUNCTION__ ), 10 );
+		}
 	}
 
 	/*
@@ -54,8 +66,11 @@ class Stock {
 	public static function SyncStockVariation( \WC_Product $product ) {
 		//first remove this action to avoid recusive call when setting translation stock
 		remove_action( 'woocommerce_variation_set_stock', array( __CLASS__, __FUNCTION__ ), 10 );
-		static::SyncStock( $product );
-		add_action( 'woocommerce_variation_set_stock', array( __CLASS__, __FUNCTION__ ), 10 );
+		try {
+			static::SyncStock( $product );
+		} finally {
+			add_action( 'woocommerce_variation_set_stock', array( __CLASS__, __FUNCTION__ ), 10 );
+		}
 	}
 
 	/*
@@ -77,7 +92,7 @@ class Stock {
 			$product_translations = [];
             if ($product_with_stock->is_type( 'variation' )) {
                 $base_variation_id = Utilities::get_translated_variation($product_with_stock->get_id(),pll_default_language());               
-    			$product_translations = Variation::getRelatedVariation( 
+            $product_translations = (array) Variation::getRelatedVariation(
                     get_post_meta( $base_variation_id, Variation::DUPLICATE_KEY, true )
                     , true );
                 if ($base_variation_id!=$product_id_with_stock){
@@ -98,7 +113,7 @@ class Stock {
 				foreach ( $product_translations as $product_translation ) {
 					if ( $product_translation != $product_with_stock->get_id() ) {
 						$translation = wc_get_product( $product_translation );
-						if ( $translation ) {
+						if ( $translation && ( ! $product_with_stock->is_type( 'variation' ) || $translation->is_type( 'variation' ) ) ) {
               //here the product stock is updated without saving then wc_update_product_stock_status will update and save status 
 							wc_update_product_stock( $translation, $targetValue, 'set', true );
               wc_update_product_stock_status ($product_translation, $target_status);

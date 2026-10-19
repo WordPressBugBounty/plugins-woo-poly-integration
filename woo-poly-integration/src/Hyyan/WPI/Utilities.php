@@ -10,6 +10,8 @@
 
 namespace Hyyan\WPI;
 
+use Hyyan\WPI\HooksInterface as Hyyan_WPI_Hooks;
+
 /**
  * Utilities.
  *
@@ -19,6 +21,38 @@ namespace Hyyan\WPI;
  */
 final class Utilities
 {
+
+    /**
+     * Run a metadata ID lookup through the native post query lifecycle.
+     *
+     * @param callable $filter SQL clauses for this lookup
+     *
+     * @return array post IDs as strings
+     */
+    public static function getPostIdsByQueryClauses(callable $filter)
+    {
+        $query = new \WP_Query();
+        $scopedFilter = static function ($clauses, $currentQuery) use ($query, $filter) {
+            return $currentQuery === $query ? $filter($clauses) : $clauses;
+        };
+        add_filter('posts_clauses', $scopedFilter, PHP_INT_MAX, 2);
+        try {
+            return array_map('strval', $query->query(array(
+                'fields' => 'ids',
+                'posts_per_page' => -1,
+                'orderby' => 'none',
+                'no_found_rows' => true,
+                'cache_results' => false,
+                'update_post_meta_cache' => false,
+                'update_post_term_cache' => false,
+                'ignore_sticky_posts' => true,
+                'suppress_filters' => false,
+                'lang' => '',
+            )));
+        } finally {
+            remove_filter('posts_clauses', $scopedFilter, PHP_INT_MAX);
+        }
+    }
 
     /**
      * Get the translations IDS of the given product ID.
@@ -144,6 +178,82 @@ final class Utilities
     }
 
     /**
+     * Get a positive integer query value, or zero for invalid input.
+     * Product translation sources require a valid creation nonce.
+     *
+     * @param string $key query field
+     * @return int
+     */
+    public static function getRequestInteger($key)
+    {
+        if (!isset($_GET[$key]) || (!is_int($_GET[$key]) && !is_string($_GET[$key]))) {
+            return 0;
+        }
+        $value = filter_var(wp_unslash($_GET[$key]), FILTER_VALIDATE_REGEXP,
+                array('options' => array('regexp' => '/^[0-9]+$/D')));
+        $source_id = $value !== false ? filter_var(ltrim((string) $value, '0'), FILTER_VALIDATE_INT,
+                array('options' => array('min_range' => 1))) : false;
+        $source_id = $source_id !== false ? $source_id : 0;
+        if ($key === 'from_post' && $source_id && get_post_type($source_id) === 'product' &&
+                (!isset($_GET['_wpnonce']) || !is_string($_GET['_wpnonce']) ||
+                !wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_wpnonce'])), 'new-post-translation'))) {
+            return 0;
+        }
+        return $source_id;
+    }
+
+    /**
+     * Get a registered language or the native all languages report selector.
+     * Post translation languages require a valid creation nonce.
+     *
+     * @param string $key query field
+     * @param mixed $default fallback when the query field is absent
+     * @return mixed registered language, report all selector, empty string for invalid input or the supplied fallback
+     */
+    public static function getRequestLanguage($key = 'new_lang', $default = '')
+    {
+        if (!isset($_GET[$key])) {
+            return $default;
+        }
+        if (!is_string($_GET[$key])) {
+            return '';
+        }
+        if ($key === 'new_lang' && isset($_GET['from_post']) &&
+                (!isset($_GET['_wpnonce']) || !is_string($_GET['_wpnonce']) ||
+                !wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_wpnonce'])), 'new-post-translation'))) {
+            return '';
+        }
+        if ($key === 'lang' && sanitize_key(wp_unslash($_GET[$key])) === 'all') {
+            return 'all';
+        }
+        $language = sanitize_text_field(wp_unslash($_GET[$key]));
+        return in_array($language, pll_languages_list(), true) ? $language : '';
+    }
+
+    /**
+     * Get a verified product translation request with a readable source and registered language.
+     *
+     * @return array|false
+     */
+    public static function getProductTranslationRequest()
+    {
+        // Product copy callbacks can run before Polylang verifies its creation link.
+        if (!current_user_can('edit_products') || !isset($_GET['_wpnonce']) ||
+                !is_string($_GET['_wpnonce']) ||
+                !wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_wpnonce'])), 'new-post-translation')) {
+            return false;
+        }
+
+        $source_id = static::getRequestInteger('from_post');
+        $language = static::getRequestLanguage();
+        if (!$source_id || !$language || get_post_type($source_id) !== 'product' ||
+                !current_user_can('read_post', $source_id)) {
+            return false;
+        }
+        return array('source_id' => $source_id, 'language' => $language);
+    }
+
+    /**
      * Get current url.
      *
      * Get the full url for current location
@@ -152,9 +262,13 @@ final class Utilities
      */
     public static function getCurrentUrl()
     {
-        return (is_ssl() ? 'https://' : 'http://')
-                . $_SERVER['HTTP_HOST']
-                . $_SERVER['REQUEST_URI'];
+        if (!isset($_SERVER['HTTP_HOST'], $_SERVER['REQUEST_URI']) ||
+                !is_string($_SERVER['HTTP_HOST']) || !is_string($_SERVER['REQUEST_URI'])) {
+            return home_url('/');
+        }
+        return esc_url_raw((is_ssl() ? 'https://' : 'http://')
+                . wp_unslash($_SERVER['HTTP_HOST'])
+                . wp_unslash($_SERVER['REQUEST_URI']), array('http', 'https'));
     }
 
     /**
@@ -175,7 +289,7 @@ final class Utilities
     {
         $result = '';
         $prefix = 'hyyan-wpi-';
-        $header = sprintf('<script type="text/javascript" id="%s">', $prefix . $ID);
+        $header = sprintf('<script type="text/javascript" id="%s">', esc_attr($prefix . $ID));
         $footer = '</script>';
 
         if (true === $jquery) {
@@ -189,7 +303,21 @@ final class Utilities
         }
 
         if (false === $return) {
-            echo $result;
+            $inlineCode = true === $jquery
+                    ? sprintf("\n jQuery(function ($) {\n %s \n});\n", $code)
+                    : $code;
+            if (function_exists('wp_print_inline_script_tag')) {
+                wp_print_inline_script_tag($inlineCode, array('type' => 'text/javascript', 'id' => $prefix . $ID));
+            } else {
+                $handle = wp_unique_id($prefix . sanitize_key($ID) . '-');
+                wp_register_script($handle, false, array(), Plugin::getVersion(), false);
+                try {
+                    wp_add_inline_script($handle, $inlineCode);
+                    wp_scripts()->print_inline_script($handle, 'after');
+                } finally {
+                    wp_deregister_script($handle);
+                }
+            }
         } else {
             return $result;
         }
@@ -278,7 +406,7 @@ final class Utilities
       					        $terms[] = array($key => $value);
                     }
       				  } else {
-      					  $terms = array( array( $key => $value ) );
+						$terms[] = array( $key => $value );
       				  }
             }
 
@@ -334,7 +462,7 @@ final class Utilities
         } elseif ($product && 'simple' === $product->get_type()) {
             $current_screen  = function_exists('get_current_screen') ? get_current_screen() : false;
             $add_new_product = $current_screen && $current_screen->post_type === 'product' && $current_screen->action === 'add';
-            $is_translation  = isset($_GET['from_post']) && isset($_GET['new_lang']);
+            $is_translation  = (bool) static::getProductTranslationRequest();
             //new product did not appear have variations due to Polylang 2.8 aggressive filtering see #535
             $has_variations  = get_children(array(
                 'post_type'   => 'product_variation',
@@ -492,13 +620,13 @@ final class Utilities
                 return $product_id;
             }
             //and now the related variation for the translation
-            $posts = get_posts(array(
-                'meta_key' => '_point_to_variation',
-                'meta_value' => $variationmaster,
+            $relatedIDS = Product\Variation::getRelatedVariation($product_id, true);
+            $posts = $relatedIDS ? get_posts(array(
+                'post__in' => $relatedIDS,
                 'post_type' => 'product_variation',
                 'post_parent' => $translated_id,
                 'lang' => $langparam,  //allow empty param to get all languages
-            ));
+            )) : array();
             //return the related variation if there is one
             if (count($posts)) {
                 return $posts[0]->ID;
@@ -576,12 +704,12 @@ final class Utilities
 
 			// unload plugin's textdomains
 			unload_textdomain( 'default' );
-			unload_textdomain( 'woocommerce' );
+			unload_textdomain( 'woocommerce', true );
 
 			//remove any previous filter
 			remove_all_filters( 'plugin_locale', 999 );
 			//allow other plugins opportunity to unload text domain
-			do_action( HooksInterface::EMAILS_SWITCH_LANGUAGE_ACTION, $languageLocale );
+			do_action( Hyyan_WPI_Hooks::EMAILS_SWITCH_LANGUAGE_ACTION, $languageLocale );
 
 			//switch locale
 			if ( function_exists( 'switch_to_locale' ) ) {
@@ -605,7 +733,7 @@ final class Utilities
 			}
 
 			//allow other plugins opportunity to reload text domain
-			do_action( HooksInterface::EMAILS_AFTER_SWITCH_LANGUAGE_ACTION, $languageLocale );
+			do_action( Hyyan_WPI_Hooks::EMAILS_AFTER_SWITCH_LANGUAGE_ACTION, $languageLocale );
 
 			$wp_locale = new \WP_Locale();
 			//remove_filter does not work with closure so use remove_all_filters with priority
@@ -640,7 +768,7 @@ final class Utilities
 			if ( $pll_lang ) {
 				$polylang->curlang = $pll_lang;
 				$GLOBALS[ 'text_direction' ] = $pll_lang->is_rtl ? 'rtl' : 'ltr';
-			} else {
+			} elseif ( is_object( $polylang->curlang ) ) {
 				//20190630: old code used in previous versions of this plugin
 				$polylang->curlang->locale = $languageLocale;
 			}

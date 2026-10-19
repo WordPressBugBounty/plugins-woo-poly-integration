@@ -11,7 +11,9 @@
  */
 namespace Hyyan\WPI\Product;
 
-use Hyyan\WPI\HooksInterface;
+// phpcs:set WordPress.Security.NonceVerification customNonceVerificationFunctions[] woo_poly_integration_get_product_translation_request
+
+use Hyyan\WPI\HooksInterface as Hyyan_WPI_Hooks;
 use Hyyan\WPI\Utilities;
 use Hyyan\WPI\Admin\Settings;
 use Hyyan\WPI\Admin\Features;
@@ -35,12 +37,15 @@ class Meta
     {
         // sync product meta
         add_action(
-            'current_screen', array($this, 'syncProductsMeta')
+            'current_screen', array($this, 'handleProductScreen')
         );
         add_action(
-            'woocommerce_product_quick_edit_save', array($this, 'saveQuickEdit')
+            'woocommerce_product_quick_edit_save', array($this, 'saveQuickEdit'), 10, 1
         );
 
+        //setup new translations only which are not yet saved by WooCommerce
+        add_action('save_post_product', array($this, 'handleNewProduct'), 5, 3);
+        
         // suppress "Invalid or duplicated SKU." error message when SKU syncronization is enabled
         add_filter(
             'wc_product_has_unique_sku',
@@ -57,6 +62,19 @@ class Meta
         }
     }
 
+    /*
+     * if a new product do the initial sync now as there is no woo save event at this point
+     *
+     * @param int       $post_id    Id of product being edited: if new product copy from source,
+     * 																if existing product synchronize translations
+     * @param \WP_Post  $post       Post object
+     * @param boolean   $update     Whether this is an existing post being updated or not
+     */
+    public function handleNewProduct($post_id, $post, $update){
+        if (! $update && woo_poly_integration_get_product_translation_request()) {
+            $this->syncTaxonomiesAndProductAttributes($post_id, $post, $update);
+        }
+    }
 
     /**
      * On insert of a new product attribute, attempt to set it to translateable by default
@@ -83,13 +101,10 @@ class Meta
      */
     public function onImport($object, $data)
     {
-        // sync product meta with polylang
-        add_filter('pll_copy_post_metas', array( __CLASS__, 'wpi_filter_pll_metas' ), 10, 5 );
-        
         //sync taxonomies
         $ProductID = $object->get_id();
         if ($ProductID) {
-            do_action('pll_save_post', $ProductID, $object,
+            do_action(Hyyan_WPI_Hooks::POLYLANG_SAVE_POST_ACTION, $ProductID, get_post($ProductID),
                 PLL()->model->post->get_translations($ProductID));
 
             $this->syncTaxonomiesAndProductAttributes($ProductID, $object, true);
@@ -106,9 +121,16 @@ class Meta
      * @param bool   $sync True if it is synchronization, false if it is a copy
      */
     public static function wpi_filter_pll_metas( $keys, $sync, $from, $to, $lang ) {
-        $wpi_keys	 = static::getProductMetaToCopy( $keys );
-        $wpi_keys	 = array_diff( $wpi_keys, array( '_default_attributes' ) );
-        return $wpi_keys;
+        static $wpi_keys;   //this filter may be called hundreds of times within the same save process 
+        if ( ! $wpi_keys ) {        
+            $wpi_keys	 = static::getProductMetaToCopy( $keys );
+            $wpi_keys	 = array_diff( $wpi_keys, array( '_default_attributes' ) );
+        }
+        $keys = $wpi_keys;
+        if ($sync && !in_array('_custom_product_attributes', $keys, true)) {
+            $keys = array_diff($keys, array('_product_attributes'));
+        }
+        return $keys;
     }
 
     /**
@@ -118,11 +140,56 @@ class Meta
      */
     public function saveQuickEdit(\WC_Product $product)
     {
-        // sync product meta with polylang
-        add_filter('pll_copy_post_metas', array( __CLASS__, 'wpi_filter_pll_metas' ), 10, 5 );
-        
-        //some taxonomies can actually be changed in the QuickEdit
         $this->syncTaxonomiesAndProductAttributes($product->get_id(), $product, true);
+    }
+    /*
+     * "correct" implementation of PLL syncing to be hooked to correct place in Woo save sequence
+     * to ensure co-dependent meta are resolved before synchronisation
+     */
+    public function syncProductMeta($from, $to, $lang, $sync = true)
+    {
+        $preserve = null;
+        $copyAttributes = null;
+        $metas = static::getProductMetaToCopy();
+        if ($sync && in_array('_product_attributes', $metas, true)
+            && !in_array('_custom_product_attributes', $metas, true)) {
+            $attributes = get_post_meta($to, '_product_attributes', true);
+            $preserve = function ($value, $key, $language, $source, $target) use ($attributes, $from, $to) {
+                if ($key !== '_product_attributes' || (int) $source !== (int) $from
+                    || (int) $target !== (int) $to || !is_array($value)) {
+                    return $value;
+                }
+                $value = array_filter($value, function ($attribute) {
+                    return !empty($attribute['is_taxonomy']);
+                });
+                foreach ((array) $attributes as $name => $attribute) {
+                    if (empty($attribute['is_taxonomy'])) {
+                        $value[$name] = $attribute;
+                    }
+                }
+                return $value;
+            };
+            $copyAttributes = function ($keys, $synchronize, $source, $target) use ($from, $to) {
+                if ($synchronize && (int) $source === (int) $from && (int) $target === (int) $to) {
+                    $keys[] = '_product_attributes';
+                }
+                return array_unique($keys);
+            };
+            add_filter('pll_copy_post_metas', $copyAttributes, 11, 4);
+            add_filter('pll_translate_post_meta', $preserve, 10, 5);
+        }
+        try {
+            if (isset(PLL()->sync->post_metas)) {
+                PLL()->sync->post_metas->copy($from, $to, $lang, $sync);
+            } else {
+                PLL()->sync->copy_post_metas($from, $to, $lang, $sync);
+            }
+        } finally {
+            if ($preserve) {
+                remove_filter('pll_translate_post_meta', $preserve, 10);
+                remove_filter('pll_copy_post_metas', $copyAttributes, 11);
+            }
+        }
     }
     
     /**
@@ -130,7 +197,7 @@ class Meta
      *
      * @return bool			false if the current post type is not "product"
      */
-    public function syncProductsMeta()
+    public function handleProductScreen()
     {
         //change proposed Teemu Suoranta 3/Nov
         $currentScreen = function_exists( 'get_current_screen' ) ? get_current_screen() : false;
@@ -138,14 +205,12 @@ class Meta
             return false;
         }
 
-        // sync product meta with polylang
-        add_filter('pll_copy_post_metas', array( __CLASS__, 'wpi_filter_pll_metas' ), 10, 5 );
+        if (isset($_GET['from_post']) && !woo_poly_integration_get_product_translation_request()) {
+            return false;
+        }
 
-        //  new code to synchronise Taxonomies and Product attributes applied to WooCommerce 3.0
-        //  which now moves product_visibility from meta to taxonomy
-        //  (includes Catalog Visibility, Featured Product previously in meta)
-        //JM2021: switch from wp_insert_post to save_post_product, and higher priority than variable hook 
-        add_action('save_post_product', array($this, 'syncTaxonomiesAndProductAttributes'), 5, 3);
+        //JM2021: #548 use WooCommerce save hook, and higher priority than variable hook 
+        add_action('woocommerce_after_product_object_save', array($this, 'syncTaxonomiesAndProductAttributesAfterProductUpdate'), 5, 2);
 
         $ID = false;
         $disable = false;
@@ -162,18 +227,13 @@ class Meta
          */
 
         if (isset($_GET['post'])) {
-            $ID = absint($_GET['post']);
-            $disable = $ID && (pll_get_post_language($ID) != pll_default_language());
-        } elseif (isset($_GET['new_lang']) || $currentScreen->base == 'edit') {
-            $disable = isset($_GET['new_lang']) && (esc_attr($_GET['new_lang']) != pll_default_language()) ?
-                true : false;
-            $ID = isset($_GET['from_post']) ? absint($_GET['from_post']) : false;
-
-            // Add the '_translation_porduct_type' meta, for the case where
-            // the product was created before plugin acivation.
-            if ($ID) {
-                $this->addProductTypeMeta($ID);
-            }
+            $ID = Utilities::getRequestInteger('post');
+            //#545 props mrleemon, only disable if post has a master version in site default language
+            $disable = $ID && ( pll_get_post_language($ID) != pll_default_language() ) 
+                && pll_get_post( $ID, pll_default_language() );                
+        } elseif (isset($_GET['new_lang']) || ($currentScreen && $currentScreen->base == 'edit')) {
+            $new_lang = Utilities::getRequestLanguage();
+            $disable = $new_lang && $new_lang != pll_default_language();
         }
 
         // disable fields edit for translation
@@ -183,12 +243,19 @@ class Meta
             );
         }
 
-		//wc3.6 compatibility props mrleemon #408
-		$this->syncSelectedproductType( $ID );
-
         return true;
     }
 
+    /*
+     * wrapper for syncTaxonomiesAndProductAttributes compatibility with woocommerce_after_product_save action 
+     */
+    public function syncTaxonomiesAndProductAttributesAfterProductUpdate($product, $data_store){
+        //once only trigger for current call, we don't want to retrigger this when translations are saved.. or variations which are handled separately
+        remove_action('woocommerce_after_product_object_save', array($this, 'syncTaxonomiesAndProductAttributesAfterProductUpdate'), 5, 2);
+        $this->addProductTypeMeta($product->get_id());
+        $this->syncTaxonomiesAndProductAttributes($product->get_id(), $product, true);
+    }
+    
     /**
      * Sync Product Taxonomies and Product Attributes:
      * after WooCommerce 3.0 a new product_visibility taxonomy handles data such as
@@ -201,23 +268,32 @@ class Meta
      */
     public function syncTaxonomiesAndProductAttributes($post_id, $post, $update)
     {
+        $request = woo_poly_integration_get_product_translation_request();
+        if (isset($_GET['from_post']) && !$request) {
+            return false;
+        }
+
+        // setup the polylang product meta filter
+        add_filter('pll_copy_post_metas', array( __CLASS__, 'wpi_filter_pll_metas' ), 10, 5 );
+
         //get the taxonomies for the post
         $taxonomies = get_object_taxonomies(get_post_type($post_id));
 
         //is this a new translation being created?
-        $copy = isset($_GET['new_lang']) && isset($_GET['from_post']);
+        $copy = (bool) $request;
 
         if ($copy) {
             // New translation - copy attributes from product source
-            $source_id = isset($_GET['from_post']) ? absint($_GET['from_post']) : false;
+            $source_id = $request['source_id'];
 
             if ($source_id) {
                 //JM2021: ensure new language is set on new translation early as lack of language taxonomy 
                 //causes some subsequent queries to fail
-                $new_lang = $_GET['new_lang'];
+                $new_lang = $request['language'];
                 if (! pll_get_post_language( $post_id )){
                     pll_set_post_language ($post_id, $new_lang);
                 }
+                $this->syncProductMeta($source_id, $post_id, $new_lang, false);
                 $this->copyTerms($source_id, $post_id, $new_lang, $taxonomies);
                 $this->syncCustomProductAttributes($source_id, $new_lang);
             }
@@ -229,6 +305,9 @@ class Meta
                 //if a translation exists, and it is not this same post
                 $translation_id = pll_get_post($post_id, $lang);
                 if (($translation_id) && ($translation_id != $post_id)) {
+                    
+                    $this->syncProductMeta($post_id, $translation_id, $lang, true);
+
                     //set ALL the terms
                     $this->copyTerms($post_id, $translation_id, $lang, $taxonomies);
 
@@ -349,7 +428,9 @@ class Meta
                 foreach ($product_translations as $product_translation) {
                     if ($product_translation != $source) {
                         $product_obj = Utilities::getProductTranslationByID($product_translation);
-                        $product_obj->set_attributes($copyattrs);
+                        if ($product_obj){
+                            $product_obj->set_attributes($copyattrs);
+                        }
                     }
                 }
             }
@@ -371,9 +452,11 @@ class Meta
     public function copyTerms($old, $new, $lang, $taxonomies)
     {
         //get the polylang options for later use
+        /* unused, replaced by later pll_is_translated_taxonomy()
         global $polylang;
         $polylang_options = get_option('polylang');
         $polylang_taxs = $polylang_options['taxonomies'];
+         */
 
         //loop through taxonomies and take appropriate action
         foreach ($taxonomies as $tax) {
@@ -394,6 +477,8 @@ class Meta
                         if (! (in_array('product_shipping_class', static::getProductMetaToCopy()))) {
                             break;
                         }
+                        $new_terms[] = $slug;
+                        break;
                     //woo3 visibility and featured product
                     case "product_visibility":
                         if (! (in_array('_visibility', static::getProductMetaToCopy()))) {
@@ -429,6 +514,12 @@ class Meta
             } // foreach old term
             if (count($new_terms) > 0) {
                 wp_set_object_terms($new, $new_terms, $tax);
+            } else {
+                //#548 if there is no source term, remove term from translation
+                //occurs when resetting visibility to default (no terms), previous terms on translations not cleared
+                if (count($old_terms) == 0) {
+                    wp_set_object_terms($new, false, $tax);
+                }
             }
         } //for each taxonomy
     }
@@ -476,7 +567,7 @@ class Meta
         //attempt to insert the new term
         $newterm = wp_insert_term($newterm_name, $tax, $args);
         if (is_wp_error($newterm)) {
-            error_log($newterm->get_error_message());
+            \wc_get_logger()->error($newterm->get_error_message(), array('source' => 'woo-poly-integration'));
             return false;
         } else {
             $newterm_id = (int) $newterm['term_id'];
@@ -580,7 +671,7 @@ class Meta
      */
     public static function getProductMetaToCopy(array $metas = array(), $flat = true)
     {
-        $default = apply_filters(HooksInterface::PRODUCT_META_SYNC_FILTER, array(
+        $default = apply_filters(Hyyan_WPI_Hooks::PRODUCT_META_SYNC_FILTER, array(
             // general
             'general' => array(
                 'name' => __('General Metas', 'woo-poly-integration'),
@@ -604,7 +695,7 @@ class Meta
                 'name' => __('Polylang Metas', 'woo-poly-integration'),
                 'desc' => __('To control these values please check ', 'woo-poly-integration') .
                     ' <a href="' . get_admin_url() . 'admin.php?page=mlang_settings">' .
-                    __('Polylang admin menu "Languages, Settings"') . '</a> ' .
+                    __('Polylang admin menu "Languages, Settings"', 'woo-poly-integration') . '</a> ' .
                     __('Synchronisation section values for Page order, Featured image, Comment Status', 'woo-poly-integration'),
                 'metas' => array(
                     'menu_order',           //controlled by Polylang Languages, Settings, Page order
@@ -621,6 +712,7 @@ class Meta
                     '_stock',
                     '_backorders',
                     '_stock_status',
+                    '_low_stock_amount',
                     '_sold_individually',
                 ),
             ),
@@ -641,7 +733,7 @@ class Meta
                 'name' => __('Attributes Metas', 'woo-poly-integration'),
                 'desc' => __('To select individual Product Attributes for translation or synchronization, turn on here and check', 'woo-poly-integration') .
                     ' <a href="' . get_admin_url() . 'admin.php?page=mlang_settings">' .
-                    __('Polylang admin menu "Languages, Settings"') . '</a> ' .
+                    __('Polylang admin menu "Languages, Settings"', 'woo-poly-integration') . '</a> ' .
                     __(' "Custom post types and Taxonomies", "Custom Taxonomies"', 'woo-poly-integration'),
                 'metas' => array(
                     '_product_attributes',
@@ -710,7 +802,7 @@ class Meta
         foreach (static::getProductMetaToCopy(array(), false) as $group) {
             $metas = array_merge($metas, $group['metas']);
         }
-        return apply_filters(HooksInterface::PRODUCT_DISABLED_META_SYNC_FILTER, array_values(array_diff($metas, static::getProductMetaToCopy())));
+        return apply_filters(Hyyan_WPI_Hooks::PRODUCT_DISABLED_META_SYNC_FILTER, array_values(array_diff($metas, static::getProductMetaToCopy())));
     }
 
     /**
@@ -747,7 +839,7 @@ class Meta
         }
         
         //filters hooked by Variable class to add locking for variations section
-        $selectors = apply_filters(HooksInterface::FIELDS_LOCKER_SELECTORS_FILTER, $selectors);
+        $selectors = apply_filters(Hyyan_WPI_Hooks::FIELDS_LOCKER_SELECTORS_FILTER, $selectors);
 
         $jsID = 'product-fields-locker';
         $code = sprintf(
@@ -756,7 +848,7 @@ class Meta
             . 'var disabledSelectors = %s;'
             . 'var metaSelectors = "";'
             . 'for (var i = 0; i < disabled.length; i++) {'
-            . '     metaSelectors += (","
+            . '     metaSelectors += ((disabledSelectors || metaSelectors ? "," : "")
                      + "." + disabled[i] + ","'
             . '       + "#" +disabled[i] + ","'
             . '      + "*[name^=\'"+disabled[i]+"\']"'
@@ -774,57 +866,11 @@ class Meta
             . 'hyyan_wpi_lockFields();'
             . '$(document).ajaxComplete(function(){'
             . '    hyyan_wpi_lockFields(); '
-            . '});', json_encode($metas), !empty($selectors) ?
-            json_encode(implode(',', $selectors)) :
-            array(rand())
+            . '});', wp_json_encode($metas, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT),
+            wp_json_encode(implode(',', $selectors), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)
         );
 
         Utilities::jsScriptWrapper($jsID, $code);
-    }
-
-    /**
-     * Sync the product select list.
-     *
-     * @param int $ID product type
-     */
-    protected function syncSelectedproductType($ID = null)
-    {
-        /*
-         * First we add save_post action to save the product type
-         * as post meta
-         *
-         * This is step is important so we can get the right product type
-         */
-        add_action('save_post', function ($_ID) {
-            $product = wc_get_product($_ID); // get_product soft deprecated for wc_get_product
-            if ($product && !isset($_GET['from_post'])) {
-                $type = $product->get_type();
-                update_post_meta($_ID, '_translation_porduct_type', $type);
-            }
-        });
-
-        /*
-         * If the _translation_porduct_type meta is
-         * found then we add the js script to sync the product type select
-         * list
-         */
-        if ($ID && (isset($_GET['from_post'])) && ($type = get_post_meta($ID, '_translation_porduct_type') ) ) {
-            //don't switch type if setting is corrupt
-            if ($type && is_array($type) && $type[0]!='' && $type[0]!='simple'){
-                add_action('admin_print_scripts', function () use ($type) {
-                    $jsID = 'product-type-sync';
-                    $code = sprintf(
-                        '// <![CDATA[ %1$s'
-                        . ' addLoadEvent(function () { '
-                        . 'document.getElementById("product-type").value="%2$s";'
-                        . '})'
-                        . '// ]]>', PHP_EOL, $type[0]
-                    );
-
-                    Utilities::jsScriptWrapper($jsID, $code, false);
-                }, 11);
-            }
-        }
     }
 
     /**
@@ -845,11 +891,10 @@ class Meta
      */
     public function suppressInvalidDuplicatedSKUErrorMsg($sku_found, $product_id, $sku)
     {
+        if ($sku === '') {
+            return $sku_found;
+        }
 
-		//if the sku is not duplicate, no further check needed
-		if ( ! $sku_found ) {
-			return false;
-		}
 		//if called with no product id from woocommerce product_duplicate
 		//no further check can be done
 		if ( ! $product_id ) {
@@ -863,19 +908,26 @@ class Meta
 		 */
 		global $wpdb;
 
-		// phpcs:ignore WordPress.VIP.DirectDatabaseQuery.DirectQuery
-		$postids = $wpdb->get_col(
-		$wpdb->prepare(
-		"SELECT $wpdb->posts.ID
-				FROM $wpdb->posts
-				LEFT JOIN $wpdb->postmeta ON ( $wpdb->posts.ID = $wpdb->postmeta.post_id )
-				WHERE $wpdb->posts.post_type IN ( 'product', 'product_variation' )
-					AND $wpdb->posts.post_status NOT IN ('trash', 'auto-draft') 
-					AND $wpdb->postmeta.meta_key = '_sku' AND $wpdb->postmeta.meta_value = %s
-					AND $wpdb->postmeta.post_id <> %d
-				", wp_slash( $sku ), $product_id
-		)
-		);
+        $cacheKey = 'duplicate_sku:' . md5($sku . ':' . (int) $product_id) . ':' . wp_cache_get_last_changed('posts');
+        $postids = wp_cache_get($cacheKey, 'woo_poly_integration', false, $found);
+        if (!$found) {
+            $postids = Utilities::getPostIdsByQueryClauses(static function ($clauses) use ($wpdb, $sku, $product_id) {
+                $clauses['join'] = " INNER JOIN {$wpdb->postmeta} ON ({$wpdb->posts}.ID = {$wpdb->postmeta}.post_id)";
+                $clauses['where'] = $wpdb->prepare(
+                    " AND {$wpdb->posts}.post_type IN ('product', 'product_variation')
+                        AND {$wpdb->posts}.post_status NOT IN ('trash', 'auto-draft')
+                        AND {$wpdb->postmeta}.meta_key = %s AND {$wpdb->postmeta}.meta_value = %s
+                        AND {$wpdb->postmeta}.post_id <> %d",
+                    '_sku', $sku, $product_id
+                );
+                $clauses['groupby'] = '';
+                $clauses['orderby'] = '';
+                $clauses['limits'] = '';
+                $clauses['distinct'] = '';
+                return $clauses;
+            });
+            wp_cache_set($cacheKey, $postids, 'woo_poly_integration', 60);
+        }
 		$curlang = pll_get_post_language( $product_id );
 		if ( ! $curlang ) {
 			//if there is no language no further check can be done

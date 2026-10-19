@@ -10,6 +10,9 @@
 
 namespace Hyyan\WPI;
 
+// phpcs:set WordPress.Security.ValidatedSanitizedInput customSanitizingFunctions[] hyyan\wpi\reports::sanitizereportid
+// phpcs:set WordPress.Security.NonceVerification customNonceVerificationFunctions[] woo_poly_integration_verify_report_request
+
 use Hyyan\WPI\Admin\Settings;
 use Hyyan\WPI\Admin\Features;
 use Hyyan\WPI\Utilities;
@@ -40,8 +43,13 @@ class Reports
      */
     public function __construct()
     {
-        $this->tab = isset($_GET['tab']) ? esc_attr($_GET['tab']) : false;
-        $this->report = isset($_GET['report']) ? esc_attr($_GET['report']) : false;
+        if (!woo_poly_integration_verify_report_request()) {
+            $this->tab = $this->report = false;
+            return;
+        }
+
+        $this->tab = isset($_GET['tab']) && is_string($_GET['tab']) ? sanitize_key(wp_unslash($_GET['tab'])) : false;
+        $this->report = isset($_GET['report']) && is_string($_GET['report']) ? sanitize_key(wp_unslash($_GET['report'])) : false;
 
         if ('off' === Settings::getOption('reports', Features::getID(), 'on')) {
             return;
@@ -89,6 +97,10 @@ class Reports
      */
     public function filterProductByLanguage(array $query)
     {
+        if (!woo_poly_integration_verify_report_request()) {
+            return $query;
+        }
+
         $reports = array(
             'sales_by_product',
             'sales_by_category',
@@ -106,7 +118,8 @@ class Reports
                 array($current) :
                 pll_languages_list();
 
-        $query['join'] .= PLL()->model->post->join_clause('posts');
+        $alias = isset($query['from']) && strpos($query['from'], ' AS orders') !== false ? 'orders' : 'posts';
+        $query['join'] .= PLL()->model->post->join_clause($alias);
         $query['where'] .= PLL()->model->post->where_clause($lang, 'post');
 
         return $query;
@@ -121,6 +134,10 @@ class Reports
      */
     public function combineProductsByLanguage($results)
     {
+        if (!woo_poly_integration_verify_report_request()) {
+            return $results;
+        }
+
         if (!is_array($results)) {
             return $results;
         }
@@ -135,7 +152,7 @@ class Reports
 
         $translated = array();
         $lang = pll_current_language() ?:
-                get_user_meta(get_current_user_id(), 'user_lang', true);
+                (get_user_meta(get_current_user_id(), 'user_lang', true) ?: pll_default_language());
 
         /* Filter data by language */
         foreach ($results as $data) {
@@ -188,6 +205,10 @@ class Reports
      */
     public function filterStockByLanguage($query)
     {
+        if (!woo_poly_integration_verify_report_request()) {
+            return $query;
+        }
+
         $lang = ($current = pll_current_language()) ?
                 array($current) :
                 pll_languages_list();
@@ -196,6 +217,17 @@ class Reports
         $where = PLL()->model->post->where_clause($lang, 'post');
 
         return str_replace('WHERE 1=1', "{$join} WHERE 1=1 {$where}", $query);
+    }
+
+    /**
+     * Normalize a valid report ID.
+     *
+     * @param mixed $id request ID
+     * @return int|false
+     */
+    private static function sanitizeReportID($id)
+    {
+        return is_int($id) || (is_string($id) && ctype_digit($id)) ? absint($id) : false;
     }
 
     /**
@@ -208,6 +240,10 @@ class Reports
      */
     public function translateProductIDS()
     {
+        if (!woo_poly_integration_verify_report_request()) {
+            return false;
+        }
+
         global $polylang, $woocommerce;
         if (!$polylang || !$woocommerce) {
             return false;
@@ -218,22 +254,21 @@ class Reports
             return false;
         }
 
-        $IDS = (array) $_GET['product_ids'];
+        $IDS = wp_parse_id_list(array_filter(array_map('Hyyan\WPI\Reports::sanitizeReportID', (array) wp_unslash($_GET['product_ids'])), 'is_int'));
+        $_GET['product_ids'] = $IDS;
         $extendedIDS = array();
 
         if (static::isCombine()) {
             foreach ($IDS as $ID) {
                 $translations = Utilities::getProductTranslationsArrayByID($ID);
-                $extendedIDS = array_merge($extendedIDS, $translations);
+                $extendedIDS = array_merge($extendedIDS, array_values($translations));
             }
-        } elseif (
-                isset($_GET['lang']) &&
-                esc_attr($_GET['lang']) !== 'all'
-        ) {
-            $lang = esc_attr($_GET['lang']);
+        } elseif ('' !== ($lang = Utilities::getRequestLanguage('lang'))) {
             foreach ($IDS as $ID) {
                 $translation = Utilities::getProductTranslationByID($ID, $lang);
-                $extendedIDS[] = $translation->id;
+                if ($translation) {
+                    $extendedIDS[] = $translation->get_id();
+                }
             }
         }
 
@@ -253,6 +288,10 @@ class Reports
      */
     public function translateCategoryIDS()
     {
+        if (!woo_poly_integration_verify_report_request()) {
+            return false;
+        }
+
         global $polylang, $woocommerce;
         if (!$polylang || !$woocommerce) {
             return false;
@@ -263,13 +302,10 @@ class Reports
             return false;
         }
 
-        if (
-                !static::isCombine() &&
-                (isset($_GET['lang']) && esc_attr($_GET['lang']) !== 'all')
-        ) {
-            $IDS = (array) $_GET['show_categories'];
+        $IDS = wp_parse_id_list(array_filter(array_map('Hyyan\WPI\Reports::sanitizeReportID', (array) wp_unslash($_GET['show_categories'])), 'is_int'));
+        $_GET['show_categories'] = $IDS;
+        if (!static::isCombine() && '' !== ($lang = Utilities::getRequestLanguage('lang'))) {
             $extendedIDS = array();
-            $lang = esc_attr($_GET['lang']);
 
             foreach ($IDS as $ID) {
                 $translation = pll_get_term($ID, $lang);
@@ -296,6 +332,10 @@ class Reports
      */
     public function addProductsInCategoryTranslations($productIDS, $categoryID)
     {
+        if (!woo_poly_integration_verify_report_request()) {
+            return $productIDS;
+        }
+
         if (static::isCombine()) {
 
             /* Find the category translations */
@@ -326,7 +366,11 @@ class Reports
      */
     public static function isCombine()
     {
+        if (!woo_poly_integration_verify_report_request()) {
+            return false;
+        }
+
         return !pll_current_language() ||
-                (isset($_GET['lang']) && esc_attr($_GET['lang']) === 'all');
+                Utilities::getRequestLanguage('lang') === 'all';
     }
 }

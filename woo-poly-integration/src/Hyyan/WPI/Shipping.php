@@ -108,7 +108,7 @@ class Shipping
         $zones = array();
 
         // Rest of the World zone
-        $zone                                              = new \WC_Shipping_Zone();
+        $zone                                              = new \WC_Shipping_Zone(0);
         $zones[$zone->get_id()]                            = $zone->get_data();
         $zones[$zone->get_id()]['formatted_zone_location'] = $zone->get_formatted_location();
         $zones[$zone->get_id()]['shipping_methods']        = $zone->get_shipping_methods();
@@ -158,7 +158,7 @@ class Shipping
      */
     public function translateShippingLabel($label)
     {
-        return function_exists('pll__') ? pll__($label) : __($label, 'woocommerce');
+        return pll__($label);
     }
 
     /**
@@ -179,11 +179,7 @@ class Shipping
         $translated = array();
 
         foreach ($shipping_methods as $shipping) {
-            if (function_exists('pll__')) {
-                $translated[] = pll__($shipping);
-            } else {
-                $translated[] = __($shipping, 'woocommerce');
-            }
+            $translated[] = pll__($shipping);
         }
 
         // Implode array to string again

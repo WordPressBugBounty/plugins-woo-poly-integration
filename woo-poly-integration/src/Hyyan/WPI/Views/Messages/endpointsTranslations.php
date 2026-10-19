@@ -7,15 +7,16 @@ if (!defined('ABSPATH')) {
 
 <?php
 
-printf(
-    __( 'You can translate woocommerce endpoints, email strings, shipping methods from polylang strings tab. <a target="_blank" href="%s">%s</a>', 'woo-poly-integration'), 
-    add_query_arg(
+echo wp_kses_post(sprintf(
+    /* translators: 1: String translations URL, 2: Link label. Translations may use numbered placeholders to reorder the arguments. */
+    __( 'You can translate woocommerce endpoints, email strings, shipping methods from polylang strings tab. <a target="_blank" href="%1$s">%2$s</a>', 'woo-poly-integration'),
+    esc_url(add_query_arg(
         array(
           'page'	 => 'mlang_strings',
           'group' => \Hyyan\WPI\Endpoints::getPolylangStringSection(),
-        ), 
-        admin_url( 'admin.php' ) 
-    ), 
-    __( 'Translate', 'woo-poly-integration' )
-)
+        ),
+        admin_url( 'admin.php' )
+    )),
+    esc_html__( 'Translate', 'woo-poly-integration' )
+));
 ?>

@@ -10,6 +10,8 @@
 
 namespace Hyyan\WPI;
 
+use Hyyan\WPI\HooksInterface as Hyyan_WPI_Hooks;
+
 /**
  * Pages.
  *
@@ -26,7 +28,7 @@ class Pages
     public function __construct()
     {
         $method = array($this, 'getPostTranslationID');
-        $pages = apply_filters(HooksInterface::PAGES_LIST, array(
+        $pages = apply_filters(Hyyan_WPI_Hooks::PAGES_LIST, array(
             'shop',
             'cart',
             'checkout',
@@ -134,7 +136,7 @@ class Pages
     {
         $result = $url;
 
-        if (!is_post_type_archive('product')) {
+        if (is_search() || !is_post_type_archive('product')) {
             return $result;
         }
 
@@ -150,10 +152,21 @@ class Pages
             $shopPageTranslation = get_post($shopPageTranslatedID);
 
             if ($shopPageTranslation) {
-		        		$slug = $shopPage->post_name;
-        				if ( $slug != $shopPageTranslation->post_name ) {
-        					$result = substr_replace( $url, $shopPageTranslation->post_name, strrpos( $url, $slug ), strlen( $slug ) );
-        				}
+                $slug = $shopPage->post_name;
+                $parts = wp_parse_url($url);
+                if ($slug !== '' && $slug !== $shopPageTranslation->post_name &&
+                        is_array($parts) && !empty($parts['path']) &&
+                        preg_match_all('#(?:^|/)(' . preg_quote($slug, '#') . ')(?=/|$)#', $parts['path'], $matches, PREG_OFFSET_CAPTURE)) {
+                    $match = end($matches[1]);
+                    $pathOffset = strlen($url) - strlen($parts['path']);
+                    if (isset($parts['query'])) {
+                        $pathOffset -= strlen($parts['query']) + 1;
+                    }
+                    if (isset($parts['fragment'])) {
+                        $pathOffset -= strlen($parts['fragment']) + 1;
+                    }
+                    $result = substr_replace($url, $shopPageTranslation->post_name, $pathOffset + $match[1], strlen($slug));
+                }
             }
         }
 
@@ -180,7 +193,7 @@ class Pages
                 array_push($transIds, pll_get_post($id));
             }
 
-            $atts['ids'] = implode($transIds, ',');
+            $atts['ids'] = implode(',', $transIds);
             $query_args['post__in'] = $transIds;
             if ( isset( $query_args[ 'p' ] ) && ( $query_args[ 'p' ] != $transIds) ) {
                 unset( $query_args[ 'p' ] );
@@ -201,7 +214,7 @@ class Pages
 			foreach ( $ids as $id ) {
 				array_push( $transIds, pll_get_term( $id ) );
 			}
-			$out[ 'ids' ] = implode( $transIds, ',' );
+			$out[ 'ids' ] = implode( ',', $transIds );
 		}
 
 		if ( isset( $atts[ 'parent' ] ) && strlen( $atts[ 'parent' ] ) ) {

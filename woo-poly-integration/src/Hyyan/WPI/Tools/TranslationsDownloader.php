@@ -10,7 +10,7 @@
 
 namespace Hyyan\WPI\Tools;
 
-use Hyyan\WPI\HooksInterface;
+use Hyyan\WPI\HooksInterface as Hyyan_WPI_Hooks;
 
 /**
  * TranslationsDownloader.
@@ -41,20 +41,22 @@ class TranslationsDownloader
         /* Check if we can download */
         if (!static::isAvaliable($locale)) {
             $notAvaliable = sprintf(
+                    /* translators: 1: Language name and locale, 2: Translation repository URL. */
                     __(
-                            'WooCommerce translation %s can not be found in : <a href="%2$s">%2$s</a>', 'woo-poly-integration'
-                    ), sprintf('%s(%s)', $name, $locale), static::getRepoUrl()
+                            'WooCommerce translation %1$s can not be found in : <a href="%2$s">%2$s</a>', 'woo-poly-integration'
+                    ), esc_html(sprintf('%s(%s)', $name, $locale)), esc_url(static::getRepoUrl())
             );
 
-            throw new \RuntimeException($notAvaliable);
+            throw new \RuntimeException(wp_kses_post($notAvaliable));
         }
 
         /* Download the language pack */
         $cantDownload = sprintf(
-                __('Unable to download WooCommerce translation %s from : <a href="%2$s">%2$s</a>', 'woo-poly-integration'), sprintf('%s(%s)', $name, $locale), static::getRepoUrl()
+                /* translators: 1: Language name and locale, 2: Translation repository URL. */
+                __('Unable to download WooCommerce translation %1$s from : <a href="%2$s">%2$s</a>', 'woo-poly-integration'), esc_html(sprintf('%s(%s)', $name, $locale)), esc_url(static::getRepoUrl())
         );
         $response = wp_remote_get(
-                sprintf('%s/%s.zip', static::getRepoUrl(), $locale), array('sslverify' => false, 'timeout' => 200)
+                sprintf('%s/%s.zip', static::getRepoUrl(), $locale), array('timeout' => 200)
         );
 
         if (
@@ -69,11 +71,11 @@ class TranslationsDownloader
                 require_once ABSPATH.'/wp-admin/includes/file.php';
 
                 if (false === ($creds = request_filesystem_credentials('', '', false, false, null))) {
-                    throw new \RuntimeException($cantDownload);
+                    throw new \RuntimeException(wp_kses_post($cantDownload));
                 }
 
                 if (!WP_Filesystem($creds)) {
-                    throw new \RuntimeException($cantDownload);
+                    throw new \RuntimeException(wp_kses_post($cantDownload));
                 }
             }
 
@@ -82,14 +84,14 @@ class TranslationsDownloader
 
             /* Save the zip file */
             if (!$wp_filesystem->put_contents($file, $response['body'], FS_CHMOD_FILE)) {
-                throw new \RuntimeException($cantDownload);
+                throw new \RuntimeException(wp_kses_post($cantDownload));
             }
 
             /* Unzip the file to wp-content/languages/plugins directory */
             $dir = trailingslashit(WP_LANG_DIR).'plugins/';
             $unzip = unzip_file($file, $dir);
             if (true !== $unzip) {
-                throw new \RuntimeException($cantDownload);
+                throw new \RuntimeException(wp_kses_post($cantDownload));
             }
 
             /* Delete the package file */
@@ -97,7 +99,7 @@ class TranslationsDownloader
 
             return true;
         } else {
-            throw new \RuntimeException($cantDownload);
+            throw new \RuntimeException(wp_kses_post($cantDownload));
         }
     }
 
@@ -111,7 +113,7 @@ class TranslationsDownloader
     public static function isAvaliable($locale)
     {
         $response = wp_remote_get(
-                sprintf('%s/%s.zip', static::getRepoUrl(), $locale), array('sslverify' => false, 'timeout' => 200)
+                sprintf('%s/%s.zip', static::getRepoUrl(), $locale), array('timeout' => 200)
         );
 
         if (
@@ -153,6 +155,6 @@ class TranslationsDownloader
                 'https://downloads.wordpress.org/translation/plugin/woocommerce/%s', WC()->version
         );
 
-        return apply_filters(HooksInterface::LANGUAGE_REPO_URL_FILTER, $url);
+        return apply_filters(Hyyan_WPI_Hooks::LANGUAGE_REPO_URL_FILTER, $url);
     }
 }

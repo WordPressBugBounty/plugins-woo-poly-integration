@@ -26,6 +26,8 @@ class Endpoints
      */
     protected $endpoints = array();
 
+    protected $endpointSources = array();
+
     /**
      * Construct object.
      */
@@ -34,6 +36,28 @@ class Endpoints
 
         /* Register endpoints to translate as polulang strings */
         $this->regsiterEndpointsTranslations();
+
+        add_filter('woocommerce_get_endpoint_url', function ($url, $endpoint, $value, $permalink) {
+            $language = pll_current_language();
+            $key = array_search($endpoint, WC()->query->get_query_vars(), true);
+            if (!$language || $key === false || !isset($this->endpointSources[$key])) {
+                return $url;
+            }
+            $translated = pll_translate_string($this->endpointSources[$key], $language);
+            if ($translated === $endpoint) { return $url; }
+            if (!get_option('permalink_structure')) {
+                $query = array();
+                wp_parse_str((string) wp_parse_url($url, PHP_URL_QUERY), $query);
+                return array_key_exists($endpoint, $query)
+                    ? add_query_arg($translated, $query[$endpoint], remove_query_arg($endpoint, $url))
+                    : $url;
+            }
+            $parts = explode('?', $url, 2);
+            $suffix = '/'.user_trailingslashit($value ? trailingslashit($endpoint).$value : $endpoint);
+            if (substr($parts[0], -strlen($suffix)) !== $suffix) { return $url; }
+            $parts[0] = substr($parts[0], 0, -strlen($suffix)).'/'.user_trailingslashit($value ? trailingslashit($translated).$value : $translated);
+            return implode('?', $parts);
+        }, 10, 4);
 
         add_action(
                 'init', array($this, 'rewriteEndpoints'), 11
@@ -87,6 +111,7 @@ class Endpoints
         }
 
         $vars = WC()->query->get_query_vars();
+        $this->endpointSources = $vars;
         foreach ($vars as $key => $value) {
             WC()->query->query_vars[$key] = $this->getEndpointTranslation($value);
         }
@@ -165,7 +190,7 @@ class Endpoints
     {
         if (get_option('permalink_structure')) {
             if (strstr($permalink, '?')) {
-                $query_string = '?'.parse_url($permalink, PHP_URL_QUERY);
+                $query_string = '?'.wp_parse_url($permalink, PHP_URL_QUERY);
                 $permalink = current(explode('?', $permalink));
             } else {
                 $query_string = '';
@@ -173,6 +198,7 @@ class Endpoints
             $url = trailingslashit($permalink)
                     .$endpoint
                     .'/'
+                    .($value !== '' ? trailingslashit($value) : '')
                     .$query_string;
         } else {
             $url = add_query_arg($endpoint, $value, $permalink);
@@ -199,8 +225,9 @@ class Endpoints
         $endpoints = WC()->query->get_query_vars();
         foreach ($endpoints as $key => $value) {
             if (isset($wp->query_vars[$key])) {
-                $link = str_replace(
-                        $value, pll_translate_string($key, $slug), $link
+                $source = isset($this->endpointSources[$key]) ? $this->endpointSources[$key] : $key;
+                $link = $this->rebuildUrl(
+                        pll_translate_string($source, $slug), $wp->query_vars[$key], $link
                 );
                 break;
             }
@@ -250,11 +277,12 @@ class Endpoints
      */
     public function showFlashMessages()
     {
+        global $current_tab;
         $screen = function_exists( 'get_current_screen' ) ? get_current_screen() : false;
         /*
          * this only gets shown once before being dismissed so show only in the relevant place
          */
-        if ( $screen && $screen->id == 'woocommerce_page_wc-settings' && isset( $_GET[ 'tab' ] ) && $_GET[ 'tab' ] == 'advanced' ) {
+        if ( $screen && $screen->id == 'woocommerce_page_wc-settings' && $current_tab === 'advanced' ) {
             FlashMessages::add(
 			MessagesInterface::MSG_ENDPOINTS_TRANSLATION, Plugin::getView( 'Messages/endpointsTranslations' )
             );

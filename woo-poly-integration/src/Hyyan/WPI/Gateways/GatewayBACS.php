@@ -24,7 +24,7 @@ class GatewayBACS extends \WC_Gateway_BACS
     /**
      * Output for the order received page.
      *
-     * Note: The difference to WC_Gateway_BACS is that we use pll__() or __()
+     * Note: The difference to WC_Gateway_BACS is that we use pll__()
      * before passing the string through wptexturize() and wpautop().
      *
      * @param int $order_id
@@ -32,7 +32,7 @@ class GatewayBACS extends \WC_Gateway_BACS
     public function thankyou_page($order_id)
     {
         if ($this->instructions) {
-            echo wpautop(wptexturize(wp_kses_post(function_exists('pll__') ? pll__($this->instructions) : __($this->instructions, 'woocommerce'))));
+            echo wp_kses_post(wpautop(wptexturize(pll__($this->instructions))));
         }
         $this->bank_details($order_id);
     }
@@ -40,7 +40,7 @@ class GatewayBACS extends \WC_Gateway_BACS
     /**
      * Add content to the WC emails.
      *
-     * Note: The difference from WC_Gateway_BACS is that we use __() before
+     * Note: The difference from WC_Gateway_BACS is that we use pll__() before
      * passing the string through wptexturize() and wpautop().
      *
      * @param WC_Order $order
@@ -51,7 +51,7 @@ class GatewayBACS extends \WC_Gateway_BACS
     {
         if (!$sent_to_admin && 'bacs' === Utilities::get_payment_method($order) && $order->has_status('on-hold')) {
             if ($this->instructions) {
-                echo wpautop(wptexturize(function_exists('pll__') ? pll__($this->instructions) : __($this->instructions, 'woocommerce'))).PHP_EOL;
+                echo wp_kses_post(wpautop(wptexturize(pll__($this->instructions)))).PHP_EOL;
             }
             $this->bank_details(Utilities::get_orderid($order));
         }
@@ -80,7 +80,7 @@ class GatewayBACS extends \WC_Gateway_BACS
         $locale        = $this->get_country_locale();
 
         // Get sortcode label in the $locale array and use appropriate one
-        $sortcode = isset($locale[ $country ]['sortcode']['label']) ? $locale[ $country ]['sortcode']['label'] : __('Sort code', 'woocommerce');
+        $sortcode = isset($locale[ $country ]['sortcode']['label']) ? $locale[ $country ]['sortcode']['label'] : __('Sort code', 'woo-poly-integration');
 
         $bacs_accounts = apply_filters('woocommerce_bacs_accounts', $this->account_details);
 
@@ -100,11 +100,11 @@ class GatewayBACS extends \WC_Gateway_BACS
                 // BACS account fields shown on the thanks page and in emails
                 $account_fields = apply_filters('woocommerce_bacs_account_fields', array(
                     'bank_name' => array(
-                        'label' => __('Bank', 'woocommerce'),
+                        'label' => __('Bank', 'woo-poly-integration'),
                         'value' => $bacs_account->bank_name,
                     ),
                     'account_number' => array(
-                        'label' => __('Account number', 'woocommerce'),
+                        'label' => __('Account number', 'woo-poly-integration'),
                         'value' => $bacs_account->account_number,
                     ),
                     'sort_code'     => array(
@@ -112,11 +112,11 @@ class GatewayBACS extends \WC_Gateway_BACS
                         'value' => $bacs_account->sort_code,
                     ),
                     'iban'          => array(
-                        'label' => __('IBAN', 'woocommerce'),
+                        'label' => __('IBAN', 'woo-poly-integration'),
                         'value' => $bacs_account->iban,
                     ),
                     'bic'           => array(
-                        'label' => __('BIC', 'woocommerce'),
+                        'label' => __('BIC', 'woo-poly-integration'),
                         'value' => $bacs_account->bic,
                     ),
                 ), $order_id);
@@ -132,7 +132,7 @@ class GatewayBACS extends \WC_Gateway_BACS
             }
 
             if ($has_details) {
-                echo '<section class="woocommerce-bacs-bank-details"><h2 class="wc-bacs-bank-details-heading">' . __('Our bank details', 'woocommerce') . '</h2>' . PHP_EOL . $account_html . '</section>';
+                echo '<section class="woocommerce-bacs-bank-details"><h2 class="wc-bacs-bank-details-heading">' . esc_html__('Our bank details', 'woo-poly-integration') . '</h2>' . PHP_EOL . wp_kses_post($account_html) . '</section>';
             }
         }
     }

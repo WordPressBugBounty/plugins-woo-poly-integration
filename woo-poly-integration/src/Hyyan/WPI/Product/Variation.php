@@ -8,7 +8,7 @@
  */
 namespace Hyyan\WPI\Product;
 
-use Hyyan\WPI\HooksInterface;
+use Hyyan\WPI\HooksInterface as Hyyan_WPI_Hooks;
 use Hyyan\WPI\Product\Meta;
 use Hyyan\WPI\Utilities;
 
@@ -69,59 +69,73 @@ class Variation
                 }
             }
         } else {
-            /* This could be a very long operation */
-            set_time_limit(0);
-            foreach ($fromVariation as $variation_id) {
-                $variation = $this->from->get_available_variation( $variation_id );
-                /*
-                 * First we check if the "to" product contains the duplicate meta
-                 * key to find out if we have to update or insert
-                 */
-                $posts = get_posts(array(
-                    'meta_key' => self::DUPLICATE_KEY,
-                    'meta_value' => $variation_id,
-                    'post_type' => 'product_variation',
-                    'post_status'	 => 'any',
-                    'post_parent' => $this->to->get_id(),
-                    //JM2021:empty lang parameter required otherwise polylang adds language filter
-                    'lang' => '',  
-                ));
-                switch (count($posts)) {
-                    case 1:
-                        // update
-                        $this->update(
-                            wc_get_product($variation_id), $posts[0], $variation
-                        );
-                        break;
-                    case 0:
-                        // insert
-                        $this->insert(wc_get_product($variation_id), $variation);
-                        break;
-                    default:
-                        //JM2021: duplicate translated variations detected:
-                        //-  update first variation eg original
-                        $this->update(
-                            wc_get_product($variation_id), $posts[0], $variation
-                        );
-                        //- delete duplicate variations
-                        $count = count($posts);
-                        error_log("woo-poly is deleting duplicate variations for variation " . $variation['variation_id'] . 
-                                " in product " . $this->from->get_id() . " translation " . $this->to->get_id());
-                        for($i = 1; $i < $count; $i++)
-                        {                            
-                            $duplicate = wc_get_product($posts[$i]);
-                            if ($duplicate){
-                                $duplicate->delete($force_delete = true);
+            $previousVariations = $this->to->get_children();
+
+            $originalTimeout = (int) ini_get('max_execution_time');
+            wc_set_time_limit(0);
+            try {
+                foreach ($fromVariation as $variation_id) {
+                    $variation = $this->from->get_available_variation( $variation_id );
+                    /*
+                     * First we check if the "to" product contains the duplicate meta
+                     * key to find out if we have to update or insert
+                     */
+                    $relatedIDS = static::getRelatedVariation($variation_id, true);
+                    $posts = $relatedIDS ? get_posts(array(
+                        'post__in' => $relatedIDS,
+                        'post_type' => 'product_variation',
+                        'post_status'	 => 'any',
+                        'post_parent' => $this->to->get_id(),
+                        //JM2021:empty lang parameter required otherwise polylang adds language filter
+                        'lang' => '',
+                    )) : array();
+                    switch (count($posts)) {
+                        case 1:
+                            // update
+                            $this->update(
+                                wc_get_product($variation_id), $posts[0], $variation
+                            );
+                            unset($previousVariations[array_search($posts[0]->ID, $previousVariations)]);
+                            break;
+                        case 0:
+                            // insert
+                            $this->insert(wc_get_product($variation_id), $variation);
+                            break;
+                        default:
+                            //JM2021: duplicate translated variations detected:
+                            //-  update first variation eg original
+                            $this->update(
+                                wc_get_product($variation_id), $posts[0], $variation
+                            );
+                            //- delete duplicate variations
+                            $count = count($posts);
+                            \wc_get_logger()->warning("woo-poly is deleting duplicate variations for variation " . $variation['variation_id'] .
+                                    " in product " . $this->from->get_id() . " translation " . $this->to->get_id(),
+                                    array('source' => 'woo-poly-integration'));
+                            for($i = 1; $i < $count; $i++)
+                            {
+                                $duplicate = wc_get_product($posts[$i]);
+                                if ($duplicate){
+                                    $duplicate->delete($force_delete = true);
+                                    unset($previousVariations[array_search($posts[$i]->ID, $previousVariations)]);
+                                }
                             }
-                        }
-                        break;
+                            break;
+                    }
                 }
+                //remove translated variations which no longer exist in source
+                foreach ($previousVariations as $variation_id) {
+                    $removedVariation = wc_get_product($variation_id);
+                    if ($removedVariation){
+                        $removedVariation->delete($force_delete = true);
+                    }
+                }
+                $target_status=$this->from->get_stock_status();
+                wc_update_product_stock_status ($this->to->get_id(), $target_status);
+                utilities::flushCacheUpdateLookupTable($this->to->get_id());
+            } finally {
+                wc_set_time_limit($originalTimeout);
             }
-            $target_status=$this->from->get_stock_status();
-            wc_update_product_stock_status ($this->to->get_id(), $target_status);
-            utilities::flushCacheUpdateLookupTable($this->to->get_id());
-            /* Restor original timeout */
-            set_time_limit(ini_get('max_execution_time'));
         }
     }
     /**
@@ -134,8 +148,23 @@ class Variation
     public static function getRelatedVariation($variatonID, $returnIDS = false)
     {
         $result = array();
-        if ( ! $variatonID ) {
-          return false;
+        if ((!is_int($variatonID) && !is_string($variatonID)) ||
+                !ctype_digit((string) $variatonID) || (int) $variatonID < 1) {
+            return false;
+        }
+        $variatonID = filter_var(ltrim((string) $variatonID, '0'), FILTER_VALIDATE_INT,
+                array('options' => array('min_range' => 1)));
+        if ($variatonID === false) {
+            return false;
+        }
+        $sourceID = get_post_meta($variatonID, self::DUPLICATE_KEY, true);
+        if ((is_int($sourceID) || is_string($sourceID)) &&
+                ctype_digit((string) $sourceID) && (int) $sourceID > 0) {
+            $sourceID = filter_var(ltrim((string) $sourceID, '0'), FILTER_VALIDATE_INT,
+                    array('options' => array('min_range' => 1)));
+            if ($sourceID !== false) {
+                $variatonID = $sourceID;
+            }
         }
 
         //previous version of code using get_post_meta() was filtered at runtime by Polylang
@@ -143,8 +172,27 @@ class Variation
         //on translations when processing new order
         //it also did not return all versions of post for deletion
         global $wpdb;
-        $postids=$wpdb->get_col("select post_id from " . $wpdb->postmeta . " where meta_key='" .
-            self::DUPLICATE_KEY .  "' and meta_value=" . $variatonID);
+        $cacheKey = 'related_variations:' . $variatonID . ':' . wp_cache_get_last_changed('posts');
+        $postids = wp_cache_get($cacheKey, 'woo_poly_integration', false, $found);
+        if (!$found) {
+            $postids = Utilities::getPostIdsByQueryClauses(static function ($clauses) use ($wpdb, $variatonID) {
+                $clauses['fields'] = "{$wpdb->postmeta}.post_id";
+                $clauses['join'] = " RIGHT JOIN {$wpdb->postmeta} ON ({$wpdb->posts}.ID = {$wpdb->postmeta}.post_id)";
+                $clauses['where'] = $wpdb->prepare(
+                    " AND meta_key = %s AND CAST(TRIM(LEADING '0' FROM meta_value) AS BINARY) = CAST(%d AS BINARY)
+                        AND {$wpdb->postmeta}.post_id <= %d",
+                    self::DUPLICATE_KEY,
+                    $variatonID,
+                    PHP_INT_MAX
+                );
+                $clauses['groupby'] = '';
+                $clauses['orderby'] = '';
+                $clauses['limits'] = '';
+                $clauses['distinct'] = '';
+                return $clauses;
+            });
+            wp_cache_set($cacheKey, $postids, 'woo_poly_integration', 60);
+        }
 
         if (true === $returnIDS) {
             return $postids;
@@ -167,9 +215,15 @@ class Variation
      */
     public static function deleteRelatedVariation($variationID)
     {
-        $products = (array) static::getRelatedVariation($variationID);
+        $products = static::getRelatedVariation($variationID);
+        if (!$products) {
+            return;
+        }
         foreach ($products as $product) {
-            wp_delete_post($product->get_id(), true);
+            if ($product->is_type('variation')) {
+                // Keep WooCommerce deletion hooks and deferred parent synchronization.
+                $product->delete(true);
+            }
         }
     }
     /**
@@ -192,8 +246,8 @@ class Variation
             //JM2021: extra protection to ensure language set as early as possible
             //as had been failing on parent language [though now fixed]
             $targetLang = pll_get_post_language( $newParentId );
-            if ( (! $targetLang) && isset($_GET['new_lang'])) {
-                $targetLang=$_GET['new_lang'];
+            if (!$targetLang) {
+                $targetLang = Utilities::getRequestLanguage();
             } 
             if ($targetLang){
                 pll_set_post_language( $ID, $targetLang );
@@ -234,7 +288,12 @@ class Variation
      */
     public function addDuplicateMeta($ID)
     {
-        if ($ID) {
+        if ((is_int($ID) || is_string($ID)) && ctype_digit((string) $ID) && (int) $ID > 0) {
+            $ID = filter_var(ltrim((string) $ID, '0'), FILTER_VALIDATE_INT,
+                    array('options' => array('min_range' => 1)));
+            if ($ID === false) {
+                return;
+            }
             $meta = get_post_meta($ID, self::DUPLICATE_KEY);
             if (empty($meta)) {
                 update_post_meta($ID, self::DUPLICATE_KEY, $ID);
@@ -293,6 +352,8 @@ class Variation
         $keys           = array_unique(array_merge(array_keys($metas_from), array_keys($metas_to)));
         /* metas disabled for sync */
         $metas_nosync   = Meta::getDisabledProductMetaToCopy();
+        // Variation insertion manages the relationship independently of copied fields.
+        $metas_nosync[] = self::DUPLICATE_KEY;
         /*
          * _variation_description meta is a text-based string and generally needs to be translated.
          * _variation_description meta is copied from product in default language to the translations
@@ -320,7 +381,7 @@ class Variation
                                 if ($term) {
                                     $term_id = $term->term_id;
                                     //ok we got a term to translate, now get translation if available
-                                    $lang = isset($_GET['new_lang']) ? esc_attr($_GET['new_lang']) : pll_get_post_language($this->to->get_id());
+                                    $lang = Utilities::getRequestLanguage() ?: pll_get_post_language($this->to->get_id());
                                     $translated_term = pll_get_term($term_id, $lang);
                                     if ($translated_term) {
                                         $translated[] = get_term_by('id', $translated_term, $tax)->slug;
@@ -369,7 +430,7 @@ class Variation
         //add shipping class not included in metas as now a taxonomy
         $this->syncShippingClass($from, $to);
 
-        do_action(HooksInterface::PRODUCT_VARIATION_COPY_META_ACTION, $from, $to, $this->from, $this->to);
+        do_action(Hyyan_WPI_Hooks::PRODUCT_VARIATION_COPY_META_ACTION, $from, $to, $this->from, $this->to);
     }
     /**
      * Get Term By Slug.

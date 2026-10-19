@@ -29,6 +29,8 @@ class Product
     public function __construct()
     {
 
+        add_filter('pll_get_new_post_translation_link', array(__CLASS__, 'addTranslationRequestNonce'), 10, 3);
+
         // manage product translation
         add_filter(
                 'pll_get_post_types', array($this, 'manageProductTranslation')
@@ -75,22 +77,65 @@ class Product
     }
 
 
+    /**
+     * Add request verification to legacy Polylang product creation links.
+     *
+     * @param string $link translation creation URL
+     * @param object $language target language
+     * @param int $source_id source post ID
+     * @return string
+     */
+    public static function addTranslationRequestNonce($link, $language, $source_id)
+    {
+        $source_id = absint($source_id);
+        if (!$link || !$source_id || get_post_type($source_id) !== 'product') {
+            return $link;
+        }
+        wp_parse_str((string) wp_parse_url(html_entity_decode($link, ENT_QUOTES, 'UTF-8'), PHP_URL_QUERY), $args);
+        return isset($args['_wpnonce']) ? $link : wp_nonce_url($link, 'new-post-translation');
+    }
+
     /*
      * #234 WooCommerce allows featured to be toggled in the products admin list
      * by clicking on the star
      */
     public static function sync_ajax_woocommerce_feature_product() {
+      // This callback runs before WooCommerce's permission and nonce checks.
+      if ( ! current_user_can( 'edit_products' ) ||
+           ! isset( $_REQUEST['_wpnonce'], $_GET['product_id'] ) ||
+           ! is_string( $_REQUEST['_wpnonce'] ) ||
+           ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_REQUEST['_wpnonce'] ) ), 'woocommerce-feature-product' ) ) {
+        return;
+      }
+
+      if (!is_int($_GET['product_id']) && !is_string($_GET['product_id'])) {
+        wp_send_json_error(array('code' => 'invalid_product'), 400);
+      }
+      $raw_id = filter_var(wp_unslash($_GET['product_id']), FILTER_VALIDATE_REGEXP,
+        array('options' => array('regexp' => '/^[0-9]+$/D')));
+      $product_id = $raw_id !== false
+        ? filter_var(ltrim((string) $raw_id, '0'), FILTER_VALIDATE_INT, array('options' => array('min_range' => 1))) : false;
+      if (!$product_id || get_post_type($product_id) !== 'product') {
+        wp_send_json_error(array('code' => 'invalid_product'), 400);
+      }
+      if (!current_user_can('edit_post', $product_id)) {
+        wp_send_json_error(array('code' => 'forbidden'), 403);
+      }
       $metas = Meta::getDisabledProductMetaToCopy();
       if ( in_array( '_visibility', $metas ) ) {
         return;
       }
-
-      $product = wc_get_product( absint( $_GET[ 'product_id' ] ) );
+      $product_translations = Utilities::getProductTranslationsArrayByID($product_id);
+      foreach ($product_translations as $translation_id) {
+        if (!current_user_can('edit_post', $translation_id)) {
+          wp_send_json_error(array('code' => 'forbidden'), 403);
+        }
+      }
+      $product = wc_get_product( $product_id );
       if ( $product ) {
         //woocommerce action runs last so we need to set translation feature to the opposite of current value
         $targetValue = ! $product->get_featured();
 
-        $product_translations = Utilities::getProductTranslationsArrayByObject( $product );
         foreach ( $product_translations as $product_translation ) {
           if ( $product_translation != $product->get_id() ) {
             $translation = wc_get_product( $product_translation );
@@ -215,17 +260,8 @@ class Product
     public function getProductAttributesInLanguage($args)
     {
         global $post;
-        $lang = '';
-
-        if (isset($_GET['new_lang'])) {
-            $lang = esc_attr($_GET['new_lang']);
-        } elseif (!empty($post)) {
-            $lang = pll_get_post_language($post->ID);
-        } else {
-            $lang = PLL()->pref_lang;
-        }
-
-        $args['lang'] = $lang;
+        $lang = !empty($post) ? pll_get_post_language($post->ID) : PLL()->pref_lang;
+        $args['lang'] = Utilities::getRequestLanguage('new_lang', $lang);
 
         return $args;
     }
@@ -235,8 +271,9 @@ class Product
     public function wpi_editor_title($title)
     {
         // Polylang sets the 'from_post' parameter
-        if (isset($_GET['from_post'])) {
-            $my_post = get_post($_GET['from_post']);
+        $source_id = Utilities::getRequestInteger('from_post');
+        if ($source_id) {
+            $my_post = $source_id && current_user_can('read_post', $source_id) ? get_post($source_id) : false;
             if ($my_post) {
                 return $my_post->post_title;
             }
@@ -248,8 +285,9 @@ class Product
     public function wpi_editor_content($content)
     {
         // Polylang sets the 'from_post' parameter
-        if (isset($_GET['from_post'])) {
-            $my_post = get_post($_GET['from_post']);
+        $source_id = Utilities::getRequestInteger('from_post');
+        if ($source_id) {
+            $my_post = $source_id && current_user_can('read_post', $source_id) ? get_post($source_id) : false;
             if ($my_post) {
                 return $my_post->post_content;
             }
@@ -261,8 +299,9 @@ class Product
     public function wpi_editor_excerpt($excerpt)
     {
         // Polylang sets the 'from_post' parameter
-        if (isset($_GET['from_post'])) {
-            $my_post = get_post($_GET['from_post']);
+        $source_id = Utilities::getRequestInteger('from_post');
+        if ($source_id) {
+            $my_post = $source_id && current_user_can('read_post', $source_id) ? get_post($source_id) : false;
             if ($my_post) {
                 return $my_post->post_excerpt;
             }

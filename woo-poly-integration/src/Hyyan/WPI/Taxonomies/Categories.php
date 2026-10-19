@@ -10,7 +10,7 @@
 
 namespace Hyyan\WPI\Taxonomies;
 
-use Hyyan\WPI\HooksInterface;
+use Hyyan\WPI\HooksInterface as Hyyan_WPI_Hooks;
 use Hyyan\WPI\Utilities;
 
 /**
@@ -48,21 +48,30 @@ class Categories implements TaxonomiesInterface
      */
     public function syncProductCatCustomFields($termID, $ttID = '', $taxonomy = '')
     {
-        if (isset($_POST['display_type']) && 'product_cat' === $taxonomy) {
+        $verified = 'product_cat' === $taxonomy && current_user_can('edit_term', absint($termID)) && (
+            (isset($_POST['_wpnonce_add-tag']) && is_string($_POST['_wpnonce_add-tag']) &&
+                wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_wpnonce_add-tag'])), 'add-tag')) ||
+            (isset($_POST['_wpnonce']) && is_string($_POST['_wpnonce']) &&
+                wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_wpnonce'])), 'update-tag_'.absint($termID)))
+        );
+        if ($verified && isset($_POST['display_type']) && is_string($_POST['display_type'])) {
             $this->doSyncProductCatCustomFields(
-                    $termID, 'display_type', esc_attr($_POST['display_type'])
+                    $termID, 'display_type', sanitize_key(wp_unslash($_POST['display_type']))
             );
         }
-        if (isset($_POST['product_cat_thumbnail_id']) && 'product_cat' === $taxonomy) {
-            $this->doSyncProductCatCustomFields(
-                    $termID, 'thumbnail_id', absint($_POST['product_cat_thumbnail_id'])
-            );
+        if ($verified && isset($_POST['product_cat_thumbnail_id']) &&
+                (is_int($_POST['product_cat_thumbnail_id']) || is_string($_POST['product_cat_thumbnail_id']))) {
+            $thumbnail = filter_var(wp_unslash($_POST['product_cat_thumbnail_id']), FILTER_VALIDATE_REGEXP,
+                    array('options' => array('regexp' => '/^[0-9]*$/D')));
+            if ($thumbnail !== false) {
+                $this->doSyncProductCatCustomFields($termID, 'thumbnail_id', absint($thumbnail));
+            }
         }
 
         if ('product_cat' === $taxonomy) {
             /* Allow other plugins to check for category custom fields */
             do_action(
-                    HooksInterface::PRODUCT_SYNC_CATEGORY_CUSTOM_FIELDS, $this, $termID, $taxonomy
+                    Hyyan_WPI_Hooks::PRODUCT_SYNC_CATEGORY_CUSTOM_FIELDS, $this, $termID, $taxonomy
             );
         }
     }
@@ -79,11 +88,14 @@ class Categories implements TaxonomiesInterface
     {
 
         /* We sync custom fields only for translation */
-        if (!(isset($_GET['from_tag']) && isset($_GET['new_lang']))) {
+        if (Utilities::getRequestLanguage() === '') {
             return false;
         }
 
-        $ID = esc_attr($_GET['from_tag']);
+        $ID = Utilities::getRequestInteger('from_tag');
+        if (!$ID) {
+            return false;
+        }
         $type = get_term_meta($ID, 'display_type', true);
         $thumbID = absint(get_term_meta($ID, 'thumbnail_id', true));
         $image = $thumbID ?
@@ -91,10 +103,10 @@ class Categories implements TaxonomiesInterface
                 wc_placeholder_img_src(); ?>
         <script type="text/javascript">
             jQuery(function ($) {
-                $('#display_type option[value="<?php echo $type ?>"]')
+                $(<?php echo wp_json_encode('#display_type option[value="' . $type . '"]', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>)
                         .prop("selected", true);
-                $('#product_cat_thumbnail img').attr('src', '<?php echo $image; ?>');
-                $('#product_cat_thumbnail_id').val('<?php echo $thumbID; ?>');
+                $('#product_cat_thumbnail img').attr('src', <?php echo wp_json_encode($image, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>);
+                $('#product_cat_thumbnail_id').val('<?php echo absint($thumbID); ?>');
         <?php if ($thumbID): ?>
                     $('.remove_image_button').show();
         <?php endif; ?>
@@ -104,7 +116,7 @@ class Categories implements TaxonomiesInterface
 
         /* Allow other plugins to check for category custom fields */
         do_action(
-                HooksInterface::PRODUCT_COPY_CATEGORY_CUSTOM_FIELDS, $ID
+                Hyyan_WPI_Hooks::PRODUCT_COPY_CATEGORY_CUSTOM_FIELDS, $ID
         );
     }
     /**

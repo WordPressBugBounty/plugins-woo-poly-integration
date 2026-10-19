@@ -57,7 +57,7 @@ class LocaleNumbers
         //if there is a currency provided, attempt a full reset of formatting parameters
         if ((isset($args['currency'])) && ($args['currency'] != '')) {
             $currency = $args['currency'];
-            $locale = pll_current_language('locale');
+            $locale = pll_current_language('locale') ?: get_locale();
             $formatter = new \NumberFormatter($locale . '@currency=' . $currency, \NumberFormatter::CURRENCY);
             $args['decimal_separator'] = $formatter->getSymbol(\NumberFormatter::DECIMAL_SEPARATOR_SYMBOL);
             $args['thousand_separator'] = $formatter->getSymbol(\NumberFormatter::GROUPING_SEPARATOR_SYMBOL);
@@ -71,9 +71,27 @@ class LocaleNumbers
         } else {
             //otherwise if no currency is set, get localized separators only as other parms depend on currency
             $args['decimal_separator'] = $this->getLocaleDecimalSeparator($args['decimal_separator']);
-            $args['thousand_separator'] = $this->getLocaleThousandSeparator($args['decimal_separator']);
+            $args['thousand_separator'] = $this->getLocaleThousandSeparator($args['thousand_separator']);
         }
         return $args;
+    }
+
+    /**
+     * Distinguish public price display callbacks from admin value formatting.
+     *
+     * @return bool
+     */
+    private function isFrontendPriceContext()
+    {
+        if (!is_admin()) {
+            return true;
+        }
+        foreach (array('woocs_get_products_price_html', 'woocs_get_variation_products_price_html', 'woocs_get_custom_price_html') as $action) {
+            if (doing_action('wp_ajax_' . $action) || doing_action('wp_ajax_nopriv_' . $action)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /*
@@ -91,10 +109,10 @@ class LocaleNumbers
         $retval = $wooFormattedValue;
 
         //don't touch values on admin screens, save as plain number using woo defaults
-        if ((!is_admin()) || isset($_REQUEST['get_product_price_by_ajax'])) {
-            $a = new \NumberFormatter(pll_current_language('locale'), \NumberFormatter::DECIMAL);
+        if (is_numeric($input) && $this->isFrontendPriceContext()) {
+            $a = new \NumberFormatter(pll_current_language('locale') ?: get_locale(), \NumberFormatter::DECIMAL);
             if ($a) {
-                $retval = $a->format($input, \NumberFormatter::TYPE_DOUBLE);
+                $retval = $a->format((float) $input, \NumberFormatter::TYPE_DOUBLE);
             }
         }
         return $retval;
@@ -112,8 +130,8 @@ class LocaleNumbers
     {
         $retval = $separator;
         //don't touch values on admin screens, save as plain number using woo defaults
-        if ((!is_admin()) || isset($_REQUEST['get_product_price_by_ajax'])) {
-            $locale = pll_current_language('locale');
+        if ($this->isFrontendPriceContext()) {
+            $locale = pll_current_language('locale') ?: get_locale();
             $a = new \NumberFormatter($locale, \NumberFormatter::DECIMAL);
             if ($a) {
                 $locale_result = $a->getSymbol(\NumberFormatter::DECIMAL_SEPARATOR_SYMBOL);
@@ -138,7 +156,7 @@ class LocaleNumbers
         $retval = $separator;
         //don't touch values on admin screens, save as plain number using woo defaults
         if (!is_admin()) {
-            $a = new \NumberFormatter(pll_current_language('locale'), \NumberFormatter::DECIMAL);
+            $a = new \NumberFormatter(pll_current_language('locale') ?: get_locale(), \NumberFormatter::DECIMAL);
             if ($a) {
                 $retval = $a->getSymbol(\NumberFormatter::GROUPING_SEPARATOR_SYMBOL);
             }
