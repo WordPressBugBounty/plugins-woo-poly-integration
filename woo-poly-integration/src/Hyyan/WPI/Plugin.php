@@ -35,6 +35,8 @@ class Plugin
     public function __construct()
     {
         FlashMessages::register();
+        new Admin\Setup();
+		new Admin\Guide();
         add_action('admin_notices', array($this, 'showWelcomeNotice'));
 
         add_action('init', array($this, 'activate'));
@@ -49,9 +51,8 @@ class Plugin
           if ( defined( 'DOING_AJAX' ) || (function_exists( 'is_ajax' ) && is_ajax()) ) {
             //skipping ajax
           } else {
-            $wcpagecheck_passed = get_option( 'wpi_wcpagecheck_passed' );
             $check_pages		 = Settings::getOption( 'checkpages', Features::getID(), 0 );
-            if ( ($check_pages && $check_pages != 'off') || ! ($wcpagecheck_passed) ) {
+            if ($check_pages && $check_pages != 'off') {
                 add_action( 'current_screen', array( __CLASS__, 'wpi_ensure_woocommerce_pages_translated' ) );
             }
           }
@@ -211,11 +212,13 @@ class Plugin
      */
     public function activate()
     {
+        $checkPages = Settings::getOption('checkpages', Features::getID(), 'off');
+        if (!$checkPages || $checkPages === 'off') {
+            FlashMessages::remove('pagechecks');
+        }
         if (!static::canActivate()) {
             FlashMessages::remove(MessagesInterface::MSG_SUPPORT);
-            FlashMessages::add(
-                    MessagesInterface::MSG_ACTIVATE_ERROR, static::getView('Messages/activateError'), array('error'), true
-            );
+            FlashMessages::remove(MessagesInterface::MSG_ACTIVATE_ERROR);
 
             return false;
         }
@@ -228,7 +231,7 @@ class Plugin
             $baseURL = is_multisite() ? get_admin_url() : admin_url();
             $settingsLinks = array(
                 static::settingsLinkHTML(),
-                '<a target="_blank" href="https://github.com/hyyan/woo-poly-integration/wiki">'
+				'<a href="' . esc_url( \Hyyan\WPI\Admin\Guide::url( 'index' ) ) . '">'
                 . esc_html__('Docs', 'woo-poly-integration')
                 . '</a>',
             );
@@ -252,13 +255,13 @@ class Plugin
      */
     public function showWelcomeNotice()
     {
-        if (!current_user_can('manage_options') || !static::canActivate()) {
-            return;
-        }
-        $screen = get_current_screen();
-        if (!$screen || !in_array($screen->id, array('plugins', 'settings_page_hyyan-wpi'), true)) {
-            return;
-        }
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		$screen = get_current_screen();
+		if ( ! $screen || 'plugins' !== $screen->id ) {
+			return;
+		}
         $version = static::getVersion();
         if (get_user_meta(get_current_user_id(), 'wpi_welcome_version', true) === $version) {
             return;
@@ -377,6 +380,7 @@ class Plugin
     {
         new Emails();
         new Admin\Settings();
+		new Admin\ProductTranslation();
         new Cart();
         //new Login();
         new Order();
@@ -412,8 +416,8 @@ class Plugin
     {
         if ('woo-poly-integration/__init__.php' == $file) {
             $row_meta = array(
-                'docs' => '<a target="_blank" href="https://github.com/hyyan/woo-poly-integration/wiki"'
-                . '" aria-label="' . esc_attr__('View WooCommerce-Polylang Integration documentation', 'woo-poly-integration') . '">'
+				'docs'    => '<a href="' . esc_url( \Hyyan\WPI\Admin\Guide::url( 'index' ) ) . '"'
+				. ' aria-label="' . esc_attr__( 'View WooCommerce-Polylang Integration documentation', 'woo-poly-integration' ) . '">'
                 . esc_html__('Docs', 'woo-poly-integration') . '</a>',
                 'support' => '<a target="_blank" href="https://github.com/hyyan/woo-poly-integration/issues"'
                 . '" aria-label="' . esc_attr__('View Issue tracker on GitHub', 'woo-poly-integration') . '">'
@@ -431,6 +435,9 @@ class Plugin
 	 *
 	 */
 	public static function wpi_ensure_woocommerce_pages_translated() {
+        if (!static::canActivate()) {
+            return;
+        }
         if (!current_user_can('manage_woocommerce') && !current_user_can('manage_options')) {
             return;
         }

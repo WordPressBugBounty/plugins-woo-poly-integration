@@ -10,12 +10,12 @@
  * Domain Path: /languages
  * GitHub Plugin URI: hyyan/woo-poly-integration
  * License: MIT
- * Version: 1.6.0
+ * Version: 1.7.0
  * Requires At Least: 5.4
  * Tested Up To: 7.1
  * WC requires at least: 3.0.0
  * WC tested up to: 11.1.2
- * Requires PHP: 7.0
+ * Requires PHP: 8.3
  */
 
 /**
@@ -93,6 +93,7 @@ new Hyyan\WPI\Plugin();
  * called when plugin is activated in settings, plugins
  */
 function woo_poly_integration_on_activate() {
+	delete_user_meta( get_current_user_id(), 'wpi_welcome_version' );
 	update_option( 'wpi_wcpagecheck_passed', false );
 	update_option( 'hyyan-wpi-flash-messages', '' );
 }

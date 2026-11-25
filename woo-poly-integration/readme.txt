@@ -2,11 +2,11 @@
 Contributors: hyyan
 Tags: woocommerce, multilingual, polylang, language, translation
 Requires at least: 5.4
-Stable tag: 1.6.0
+Stable tag: 1.7.0
 Tested Up To: 7.1
 WC requires at least: 3.0.0
 WC tested up to: 11.1.2
-Requires PHP: 7.0
+Requires PHP: 8.3
 License: MIT
 License URI: https://github.com/hyyan/woo-poly-integration/blob/main/LICENSE
 
@@ -16,7 +16,7 @@ Connect WooCommerce and Polylang for a multilingual store.
 
 Build a multilingual WooCommerce store with Polylang. Translate products and store pages, synchronize shared product data, and let customers shop in their chosen language.
 
-[Documentation](https://hyyan.github.io/woo-poly-integration/) | [Getting started](https://hyyan.github.io/woo-poly-integration/getting-started/) | [Report an issue](https://github.com/hyyan/woo-poly-integration/issues)
+Documentation: WordPress admin → Tools → WooPoly Documentation | Getting started: Settings → WooPoly | [Report an issue](https://github.com/hyyan/woo-poly-integration/issues)
 
 For bug reports and feature requests, please use GitHub issues and include your plugin versions and steps to reproduce. Remove private data from any logs you share.
 
@@ -45,22 +45,28 @@ For bug reports and feature requests, please use GitHub issues and include your 
 
 = What you need to know about this plugin =
 
-The plugin declares WordPress 5.4+, PHP 7.0+, WooCommerce 3.0+, and Polylang 2.0+. Your installed dependencies may require newer PHP versions.
+The plugin requires WordPress 5.4+, PHP 8.3+, WooCommerce 3.0+, and Polylang 2.0+. Your installed dependencies may require newer WordPress or PHP versions.
 
-Version 1.6.0 has been tested with WordPress 7.1.3, WooCommerce 11.1.2, Polylang 3.8.10, and PHP 8.5.11. Older supported versions have not all been retested. Back up your store and test updates on a staging site first.
+Version 1.7.0 has been tested with WordPress 7.1.3, WooCommerce 11.1.2, Polylang 3.8.10, and PHP 8.5.11. Older supported versions have not all been retested. Back up your store and test updates on a staging site first.
 
 Choose your default language before creating variable products; changing it afterward is unsupported. Polylang's "The language is set from content" URL mode is also unsupported.
 
 = Setup your environment =
 
-1. Configure WooCommerce, Polylang, and your store languages before activating this plugin.
-2. Review Settings > WooPoly, translate your store pages, and check their language assignments.
+1. Install and activate this plugin, WooCommerce, and Polylang in any order.
+2. Open Settings > WooPoly. Follow the checklist to activate dependencies, choose languages, and create or link your store pages.
 3. Translate product categories and attributes as needed, then create and link product translations.
 4. Test product selection, stock, cart, checkout, and emails in every store language before going live.
 
-= Keep in touch =
+= A note from Hyyan =
 
-Created by Hyyan Abo Fakher. If WooPoly is useful to you, a [star on GitHub](https://github.com/hyyan/woo-poly-integration) helps others discover it. You are also welcome to follow my work on [GitHub](https://github.com/hyyan) or [LinkedIn](https://www.linkedin.com/in/hyyan/).
+I started WooPoly in 2015 to help shop owners sell in more than one language. WooPoly has been free from day one. My commitment is to keep it free and open source.
+
+If WooPoly has helped you run your shop, would you [star it on GitHub](https://github.com/hyyan/woo-poly-integration)? It lets me know the work is useful. If you prefer WordPress.org, [a review](https://wordpress.org/support/plugin/woo-poly-integration/reviews/#new-post) about what worked for your store helps the next shop owner decide. Thank you for giving WooPoly a place in your shop.
+
+[Share WooPoly on LinkedIn](https://www.linkedin.com/feed/?shareActive=true&text=%40Hyyan%20Abo%20Fakher%20created%20WooPoly%20in%202015%20to%20connect%20WooCommerce%20with%20Polylang.%20With%20WooPoly%2C%20a%20shop%20can%20list%20the%20same%20product%20in%20several%20languages%20and%20keep%20one%20stock%20count%20across%20all%20its%20translations.%0A%0AHyyan%20made%20WooPoly%20free%20and%20open%20source%20from%20day%20one%20and%20has%20pledged%20to%20keep%20it%20that%20way.%20If%20you%20know%20someone%20building%20a%20multilingual%20store%2C%20pass%20this%20along.%0A%0Ahttps%3A%2F%2Fwordpress.org%2Fplugins%2Fwoo-poly-integration%2F).
+
+— [Hyyan Abo Fakher](https://www.linkedin.com/in/hyyan/)
 
 = Translations =
 
@@ -75,7 +81,7 @@ ways you can contribute:
 * Reporting issues (please read [issue guidelines](https://github.com/hyyan/woo-poly-integration/blob/main/.github/CONTRIBUTING.md))
 * Suggesting new features
 * Writing or refactoring [code](https://github.com/hyyan/woo-poly-integration)
-* Improving [documentation](https://hyyan.github.io/woo-poly-integration/)
+* Improving the bundled documentation
 * Fixing [issues](https://github.com/hyyan/woo-poly-integration/issues)
 
 == Installation ==
@@ -89,11 +95,11 @@ In your site Admin, go to Plugins, Add New and search for Hyyan WooCommerce Poly
 1. Download the plugin as zip archive and then upload it to your wordpress plugins folder and
 extract it there.
 
-In all cases please do ensure you have Polylang and WooCommerce activated and setup
-before you Activate this plugin from your admin panel
+Activate the plugin, then open Settings > WooPoly. Its setup checklist guides you
+through WooCommerce, Polylang, your languages, and translated store pages.
 
 Please note the getting started notes:
-https://hyyan.github.io/woo-poly-integration/getting-started/
+In WordPress, open Settings → WooPoly.
 
 
 == Frequently Asked Questions ==
@@ -125,91 +131,31 @@ Check the language assignments and translations for your terms, then save Settin
 6. Control plugin features from its admin page
 
 == Changelog ==
-= 1.6.0 =
+= 1.7.0 =
 
-* fix: initialize CI fixtures and guard deferred product saves
-* fix: secure variation removal and synchronize parent prices
-* fix: complete secure plugin maintenance
-* fix: preserve variation relationships during stock updates
-* fix: reject integer overflow before variation operations
-* fix: restrict variation stock and coupons to variations
-* fix: verify custom report requests before translation
-* fix: centralize native report language selection
-* fix: centralize attribute language request fallback
-* fix: verify translation language and metadata setup
-* fix: verify product editor translation requests
-* fix: preserve catalogs with native version aware loading
-* fix: use native settings context for endpoint notices
-* fix: own message domains and retain WooCommerce translations
-* fix: number translation formats and preserve legacy catalogs
-* fix: resolve coupon screens and verify translation warning bypass
-* fix: verify creation callbacks and resolve attribute screens
-* fix: expose verified product creation requests to security checks
-* fix: identify plugin hook constants with their owning prefix
-* fix: translate stored checkout text through Polylang
-* fix: preserve cart stock checks on WooCommerce 3.0
-* fix: invalidate cached product lookups on native changes
-* fix: normalize request IDs through validated sanitizers
-* fix: retain published WooCommerce minimum requirement
-* fix: use compliant plugin display name in release headers
-* fix: reuse exact variation relationships across lookup paths
-* fix: match normalized variation relationships exactly
-* fix: verify early product translation creation requests
-* fix: validate registered languages across request filters
-* fix: defer product type metadata backfill until save
-* fix: remove obsolete product type request callbacks
-* fix: prefix plugin callbacks and sharing variables
-* fix: verify stock edit requests and use native diagnostics
-* fix: verify category requests and normalize request identifiers
-* fix: sanitize admin notices and translation error output
-* fix: preserve language filtered reports under HPOS
-* fix: translate configured block and receipt payment titles
-* fix: translate configured native tax rate labels
-* fix: preserve native translated store notice controls
-* fix: preserve variation copy and import synchronization
-* fix: preserve independent product attributes during copies
-* fix: restore stock synchronization callbacks after errors
-* fix: resolve validated translated variation deletion sources
-* fix: replace only complete translated shop path segments
-* fix: retain product defaults and reload locale catalogs
-* fix: restore caller language after translated emails
-* fix: preserve translated cart state and validation
-* fix: preserve translated checkout receipt endpoints
-* fix: preserve translated account endpoints when switching languages
-* fix: preserve native block store page translations
-* fix: exclude development files from release packages
-* fix: remove automatic third-party admin resources
-* fix: preserve native URLs and restore variation timeouts
-* fix: protect stock synchronization across request contexts
-* fix: correct translation calls and preserve catalog contracts
-* fix: preserve literal SKU checks and secure coupon diagnostics
-* fix: secure settings output and restrict page maintenance
-* fix: secure inline script data and preserve editor restrictions
-* fix: validate navigation filters and current URL inputs
-* fix: validate product synchronization request inputs
-* fix: preserve Polylang post fields during product import
-* fix: validate language and translation request boundaries
-* fix: escape translated template and gateway output
-* fix: guard executable files outside WordPress
-* fix: escape status report locale and path output
-* fix: verify translation download certificates
-* fix: encode category translation script values
-* fix: load the cookie API required by cart fragments
-* fix: preserve absent Polylang language for unknown locales
-* fix: translate account email templates
-* fix: preserve block checkout order language
-* fix: use WordPress locale when checkout language is unavailable
-* fix: load rest of world shipping methods
-* fix: restore translated shortcodes on PHP 8
-* fix: preserve product search language links
-* fix: authorize translated featured product toggles
-* fix: preserve empty values during decimal localization
-* fix: validate and authorize linked variation removal
-* fixes #568
+* feat: filter WooCommerce REST products by language
+* feat: filter WooCommerce REST product collections by language
+* feat: translate WooCommerce products and metadata with DeepL
+* feat: integrate the DeepL workflow with the bundled product guide
+* fix: register the DeepL key in WooPoly feature settings
+* fix: configure the store DeepL key in WooPoly settings
+* feat: manage personal DeepL keys in the product editor
+* feat: create linked WooCommerce product drafts with DeepL
+* fix: preserve paragraph breaks in LinkedIn share links
+* feat: add maintainer pledge and project sharing to WooPoly
+* feat: bundle the WooPoly guide in WordPress admin
+* fix: preserve adjusted prices on translated cart rows
+* Remove the translated cart discount documentation
+* Explain discounted row subtotals in translated carts
+* Preserve adjusted cart prices on translated product rows
+* Explain setup progress and how to resume the checklist
+* Guide merchants through multilingual store setup
+* Merge pull request #572 from hyyan/dependabot/npm_and_yarn/multi-4e2dc1f270
+* fix: publish complete release changelog in WordPress readme
 
 [Full changelog](https://github.com/hyyan/woo-poly-integration/blob/main/CHANGELOG.md).
 
 == Upgrade Notice ==
 
-= 1.6.0 =
+= 1.7.0 =
 Review the changelog and back up your store before updating.

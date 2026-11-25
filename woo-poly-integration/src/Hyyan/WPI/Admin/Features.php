@@ -10,6 +10,7 @@
 
 namespace Hyyan\WPI\Admin;
 
+use Hyyan\WPI\Product\DeepL;
 use Hyyan\WPI\Utilities;
 
 /**
@@ -19,6 +20,8 @@ use Hyyan\WPI\Utilities;
  */
 class Features extends AbstractSettings
 {
+	const DEEPL_KEY_MASK = '********';
+
     /**
      * {@inheritdoc}
      */
@@ -26,6 +29,28 @@ class Features extends AbstractSettings
     {
         return 'wpi-features';
     }
+
+	/**
+	 * Keep the credential out of the password field and the public features array.
+	 *
+	 * @param mixed $value Submitted password field.
+	 * @return string Mask for the stored credential, or an empty field.
+	 */
+	public function sanitizeDeepLKey( $value ) {
+		$value = is_string( $value ) ? trim( $value ) : null;
+
+		if ( '' === $value ) {
+			delete_option( DeepL::STORE_KEY );
+
+			return '';
+		}
+
+		if ( self::DEEPL_KEY_MASK !== $value && ! DeepL::saveStoreKey( $value ) ) {
+			add_settings_error( self::getID(), 'deepl-key', __( 'Could not save the DeepL API key.', 'woo-poly-integration' ) );
+		}
+
+		return DeepL::storeKey() ? self::DEEPL_KEY_MASK : '';
+	}
 
     /**
      * {@inheritdoc}
@@ -40,7 +65,7 @@ class Features extends AbstractSettings
                           Plugin Features.', 'woo-poly-integration'
                 ) . ' ' . __(
                         'For more information please see:', 'woo-poly-integration'
-                ) . ' <a target="_blank" href="https://github.com/hyyan/woo-poly-integration/wiki/Settings---Features"> ' .
+				) . ' <a href="' . esc_url( \Hyyan\WPI\Admin\Guide::url( 'settings/features' ) ) . '"> ' .
                     __('documentation pages', 'woo-poly-integration') . '</a>.',
             ),
         );
@@ -52,6 +77,20 @@ class Features extends AbstractSettings
     protected function doGetFields()
     {
         return array(
+			array(
+				'name'              => 'deepl-api-key',
+				'type'              => 'password',
+				'default'           => DeepL::storeKey() ? self::DEEPL_KEY_MASK : '',
+				'label'             => __( 'DeepL API key', 'woo-poly-integration' ),
+				'desc'              => __( 'Store key for product translation. Enter a new key to replace it or clear the field to remove it.', 'woo-poly-integration' ) . ' <a href="' . esc_url( Guide::url( 'translations/deepl' ) . '#connect-a-deepl-api-key' ) . '">' . esc_html__( 'DeepL setup guide', 'woo-poly-integration' ) . '</a>',
+				'sanitize_callback' => array( $this, 'sanitizeDeepLKey' ),
+			),
+			array(
+				'name'  => 'deepl-meta-keys',
+				'type'  => 'text',
+				'label' => __( 'DeepL product text fields', 'woo-poly-integration' ),
+				'desc'  => __( 'Additional custom field keys containing translatable product text, separated by commas.', 'woo-poly-integration' ) . ' <a href="' . esc_url( Guide::url( 'translations/deepl' ) . '#include-custom-text-fields' ) . '">' . esc_html__( 'Custom field example', 'woo-poly-integration' ) . '</a>',
+			),
             array(
                 'name' => 'fields-locker',
                 'type' => 'checkbox',
@@ -93,7 +132,7 @@ class Features extends AbstractSettings
                 'type' => 'checkbox',
                 'default' => 'on',
                 'label' => __('Stock Sync', 'woo-poly-integration'),
-                'desc' => ' <a target="_blank" href="https://github.com/hyyan/woo-poly-integration/wiki/Stock"> '.
+				'desc'    => ' <a href="' . esc_url( \Hyyan\WPI\Admin\Guide::url( 'products/stock' ) ) . '"> ' .
                             __(
                         'Sync stock for product and its translations', 'woo-poly-integration'
                 ) . '.</a> <strong>' . __(
@@ -105,7 +144,7 @@ class Features extends AbstractSettings
                 'type' => 'checkbox',
                 'default' => 'on',
                 'label' => __('Translate Categories', 'woo-poly-integration'),
-                'desc' => ' <a target="_blank" href="https://github.com/hyyan/woo-poly-integration/wiki/Product-Categories"> '.
+				'desc'    => ' <a href="' . esc_url( \Hyyan\WPI\Admin\Guide::url( 'products/categories' ) ) . '"> ' .
                             __(
                         'Enable categories translations', 'woo-poly-integration'
                 )   . '</a>.',
@@ -115,7 +154,7 @@ class Features extends AbstractSettings
                 'type' => 'checkbox',
                 'default' => 'on',
                 'label' => __('Translate Tags', 'woo-poly-integration'),
-                'desc' => ' <a target="_blank" href="https://github.com/hyyan/woo-poly-integration/wiki/Product-Tags"> '.
+				'desc'    => ' <a href="' . esc_url( \Hyyan\WPI\Admin\Guide::url( 'products/tags' ) ) . '"> ' .
                             __(
                         'Enable tags translations', 'woo-poly-integration'
                 )   . '</a>.',
@@ -125,7 +164,7 @@ class Features extends AbstractSettings
                 'type' => 'checkbox',
                 'default' => 'on',
                 'label' => __('Translate Attributes', 'woo-poly-integration'),
-                'desc' => ' <a target="_blank" href="https://github.com/hyyan/woo-poly-integration/wiki/Product-Attributes"> '.
+				'desc'    => ' <a href="' . esc_url( \Hyyan\WPI\Admin\Guide::url( 'products/attributes' ) ) . '"> ' .
                             __(
                         'Enable attributes translations', 'woo-poly-integration'
                 )  . '</a>.',
@@ -150,7 +189,7 @@ class Features extends AbstractSettings
                 'type' => 'checkbox',
                 'default' => 'on',
                 'label' => __('Use locale number formats', 'woo-poly-integration'),
-                'desc' => ' <a target="_blank" href="https://github.com/hyyan/woo-poly-integration/wiki/Price-Localization"> ' .
+				'desc'    => ' <a href="' . esc_url( \Hyyan\WPI\Admin\Guide::url( 'products/price-localization' ) ) . '"> ' .
                    __(
                         'Format numbers according to the convention for current language', 'woo-poly-integration')
                  . '</a>.'
@@ -161,7 +200,7 @@ class Features extends AbstractSettings
                 'type' => 'checkbox',
                 'default' => 'on',
                 'label' => __('Synchronize on Import', 'woo-poly-integration'),
-                'desc' => ' <a target="_blank" href="https://github.com/hyyan/woo-poly-integration/wiki/Upload,-Bulk-Edit,-Quick-Edit"> ' .
+				'desc'    => ' <a href="' . esc_url( \Hyyan\WPI\Admin\Guide::url( 'products/import-and-bulk-edit' ) ) . '"> ' .
                    __(
                         'When using WooCommerce 3.1 importer to importing updates to existing items, apply synchronization rules to update any existing translations.', 'woo-poly-integration')
                  . '</a>.'
